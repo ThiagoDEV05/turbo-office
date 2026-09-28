@@ -57,6 +57,11 @@ function rejoin(name, delay) {
 // Checagem periódica: canal fechado, com erro ou "entrando" há muito tempo → recria
 export function healthCheck() {
   if (stopping || !sb) return;
+  // Estou mesmo visível para os outros? Se o servidor "esqueceu" minha presença, publica de novo.
+  if (lobby?.state === 'joined' && state.me && !lobby.presenceState()[state.me]) {
+    console.warn('Presença própria ausente no servidor; republicando');
+    lobby.track({ ...meta, sid, t: Date.now() }).catch(() => rejoin('lobby', 0));
+  }
   for (const name of Object.keys(makers)) {
     const ch = current[name];
     const st = ch?.state;
@@ -103,7 +108,7 @@ export async function startNet(client) {
   };
 
   makers.lobby(); makers.inbox(); makers.db();
-  setInterval(healthCheck, 20000);
+  setInterval(healthCheck, 10000);
   addEventListener('online', () => healthCheck());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) healthCheck(); });
 }
