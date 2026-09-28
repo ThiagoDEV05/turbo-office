@@ -299,22 +299,52 @@ function createPeer(id, initiator) {
     emit('tiles');
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed') closePeer(id, true);
+    if (pc.connectionState === 'failed') { failures.set(id, (failures.get(id) || 0) + 1); closePeer(id, true); }
+    if (pc.connectionState === 'connected') failures.delete(id);
     if (pc.connectionState === 'connected') for (const p of peers.values()) tunePeer(p);
     emit('tiles');
   };
   return peer;
 }
 
-// Espera o ICE terminar de coletar candidatos (ou 1,2 s) para mandar tudo numa mensagem só.
+// Espera as rotas de rede principais antes de mandar o convite: terminar a coleta, ou ~0,4 s
+// depois da primeira rota pública (STUN/TURN), ou no máximo 3 s. O que chegar depois vai por "trickle".
 function iceGathered(pc) {
   if (pc.iceGatheringState === 'complete') return Promise.resolve();
   return new Promise((resolve) => {
-    const done = () => { pc.removeEventListener('icegatheringstatechange', check); clearTimeout(timer); resolve(); };
+    let soon = null;
+    const done = () => { pc.removeEventListener('icegatheringstatechange', check); pc.removeEventListener('icecandidate', cand); clearTimeout(timer); clearTimeout(soon); resolve(); };
     const check = () => { if (pc.iceGatheringState === 'complete') done(); };
-    const timer = setTimeout(done, 1200);
+    const cand = (e) => { if (e.candidate && /typ (srflx|relay)/.test(e.candidate.candidate) && !soon) soon = setTimeout(done, 400); };
+    const timer = setTimeout(done, 3000);
     pc.addEventListener('icegatheringstatechange', check);
+    pc.addEventListener('icecandidate', cand);
   });
+}
+
+// Rotas que aparecem depois do convite já enviado: manda em lotes (trickle ICE)
+function setupTrickle(peer) {
+  peer.sentSdp = '';
+  peer.iceQueue = [];
+  peer.pc.addEventListener('icecandidate', (e) => {
+    if (!e.candidate || !peer.sentSdp || peer.sentSdp.includes(e.candidate.candidate)) return;
+    peer.iceQueue.push(e.candidate.toJSON());
+    if (!peer.iceTimer) peer.iceTimer = setTimeout(() => {
+      peer.iceTimer = null;
+      const batch = peer.iceQueue.splice(0);
+      if (batch.length && peers.get(peer.id) === peer) sendTo(peer.id, 'signal', { data: { type: 'ice', candidates: batch } });
+    }, 250);
+  });
+}
+function markSent(peer) { peer.sentSdp = peer.pc.localDescription?.sdp || ' '; }
+
+// Rotas que chegaram antes do convite/resposta (as mensagens podem chegar fora de ordem)
+const earlyIce = new Map(); // from -> candidates[]
+async function flushIce(peer) {
+  const list = [...(peer.pendingIce || []), ...(earlyIce.get(peer.id) || [])];
+  peer.pendingIce = [];
+  earlyIce.delete(peer.id);
+  for (const c of list) await peer.pc.addIceCandidate(c).catch(() => {});
 }
 
 async function connect(id) {
@@ -326,10 +356,12 @@ async function connect(id) {
     const track = localTrack(i);
     if (track) await t.sender.replaceTrack(track);
   }
+  setupTrickle(peer);
   const offer = await pc.createOffer();
   await pc.setLocalDescription({ type: 'offer', sdp: tuneOpus(offer.sdp) });
   await iceGathered(pc);
   if (peers.get(id) !== peer) return;
+  markSent(peer);
   sendTo(id, 'signal', { room: state.voiceRoom, data: { type: 'offer', sdp: pc.localDescription.toJSON() } });
 }
 
@@ -354,7 +386,9 @@ on('inbox:signal', async ({ from, room, data }) => {
       if (peers.has(from)) closePeer(from, false);
       const peer = createPeer(from, false);
       const { pc } = peer;
+      setupTrickle(peer);
       await pc.setRemoteDescription(data.sdp);
+      await flushIce(peer);
       const ts = pc.getTransceivers();
       for (let i = 0; i < ts.length && i < NSLOTS; i++) {
         ts[i].direction = 'sendrecv';
@@ -366,10 +400,17 @@ on('inbox:signal', async ({ from, room, data }) => {
       await pc.setLocalDescription({ type: 'answer', sdp: tuneOpus(answer.sdp) });
       await iceGathered(pc);
       if (peers.get(from) !== peer) return;
+      markSent(peer);
       sendTo(from, 'signal', { data: { type: 'answer', sdp: pc.localDescription.toJSON() } });
     } else if (data.type === 'answer') {
       const peer = peers.get(from);
-      if (peer && peer.pc.signalingState === 'have-local-offer') await peer.pc.setRemoteDescription(data.sdp);
+      if (peer && peer.pc.signalingState === 'have-local-offer') { await peer.pc.setRemoteDescription(data.sdp); await flushIce(peer); }
+    } else if (data.type === 'ice') {
+      const list = Array.isArray(data.candidates) ? data.candidates.slice(0, 50) : [];
+      const peer = peers.get(from);
+      if (peer?.pc.remoteDescription) for (const c of list) await peer.pc.addIceCandidate(c).catch(() => {});
+      else if (peer) (peer.pendingIce ||= []).push(...list);
+      else earlyIce.set(from, [...(earlyIce.get(from) || []), ...list].slice(-50));
     } else if (data.type === 'bye') {
       closePeer(from, false);
     } else if (data.type === 'hello') {
@@ -389,7 +430,9 @@ on('inbox:signal', async ({ from, room, data }) => {
 // um novo ("hello") — assim ninguém fica na sala sem áudio esperando recarregar.
 const waitingSince = new Map();
 const lastHello = new Map();
-const BAD_AFTER = 8000;
+const BAD_AFTER = 20000; // tempo para rotas via NAT/TURN antes de recomeçar
+const failures = new Map(); // id -> tentativas que falharam (rede bloqueando a conexão direta)
+export const connectionHint = (id) => (failures.get(id) >= 2 ? 'Rede bloqueando a conexão direta — tentando de novo…' : 'Conectando…');
 
 export function updatePeers() {
   const room = state.voiceRoom;
@@ -401,13 +444,14 @@ export function updatePeers() {
       if (peer.pc.connectionState === 'connected') peer.badSince = null;
       else peer.badSince ??= now;
     }
-    const stuck = peer && peer.badSince && now - peer.badSince > BAD_AFTER;
+    const dead = peer && (peer.pc.connectionState === 'closed' || peer.pc.connectionState === 'failed');
+    const stuck = peer && (dead || (peer.badSince && now - peer.badSince > BAD_AFTER));
     if (state.me < id) {
       if (!peer) connect(id).catch((e) => console.warn(e));
       else if (stuck) closePeer(id, false); // recria no próximo ciclo
     } else if (!peer || stuck) {
       if (!waitingSince.has(id)) waitingSince.set(id, now);
-      if (now - waitingSince.get(id) > 3000 && now - (lastHello.get(id) || 0) > 5000) {
+      if (now - waitingSince.get(id) > 4000 && now - (lastHello.get(id) || 0) > 12000) {
         lastHello.set(id, now);
         sendTo(id, 'signal', { room, data: { type: 'hello' } });
       }
@@ -566,7 +610,7 @@ function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) 
   el.classList.toggle('mirror', !!mirror);
   el.querySelector('.tile-name').textContent = name;
   el.querySelector('.tile-icons').textContent = icons || '';
-  el.querySelector('.tile-state').textContent = connecting ? 'Conectando…' : '';
+  el.querySelector('.tile-state').textContent = connecting ? connectionHint(id) : '';
   const ph = el.querySelector('.placeholder span');
   const photo = photoOf(id);
   ph.style.background = photo ? `center / cover no-repeat url("${photo}")` : colorOf(id);
