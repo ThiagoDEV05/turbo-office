@@ -4,6 +4,7 @@
 // para gastar poucas mensagens de sinalização.
 import { state, emit, on, displayName, colorOf, initials, membersIn, photoOf } from './state.js';
 import { sendTo, setMeta } from './net.js';
+import { BackgroundProcessor, getBackground, setBackgroundPref } from './background.js';
 
 // 4 canais fixos por conexão: voz, câmera, tela e som da tela
 const SLOTS = ['audio', 'cam', 'screen', 'screenAudio'];
@@ -134,14 +135,47 @@ export async function startMic() {
   }
 }
 
+// Câmera: local.camRaw é a câmera de verdade; local.cam é o que vai para os outros
+// (a própria câmera, ou o vídeo com fundo virtual aplicado).
+let bgProcessor = null;
+const hasEffect = (bg) => bg && bg !== 'none';
+
+async function applyBackground() {
+  const bg = getBackground();
+  if (!local.camRaw) return;
+  if (!hasEffect(bg)) {
+    bgProcessor?.stop(); bgProcessor = null;
+    local.cam = local.camRaw;
+  } else if (bgProcessor) {
+    bgProcessor.setBackground(bg); // troca de fundo sem reiniciar
+    return;
+  } else {
+    try {
+      bgProcessor = new BackgroundProcessor();
+      local.cam = await bgProcessor.start(local.camRaw, bg);
+    } catch (e) {
+      console.warn('Fundo virtual indisponível', e);
+      bgProcessor = null;
+      local.cam = local.camRaw;
+      emit('bg-error', e);
+    }
+  }
+  replaceAll(1, local.cam);
+  emit('tiles');
+}
+
 export async function startCam() {
   try {
+    const effect = hasEffect(getBackground());
+    // Com fundo virtual, 720p deixa o recorte leve e fluido
     const s = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: local.camDeviceId ? { exact: local.camDeviceId } : undefined, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+      video: { deviceId: local.camDeviceId ? { exact: local.camDeviceId } : undefined, width: { ideal: effect ? 1280 : 1920 }, height: { ideal: effect ? 720 : 1080 }, frameRate: { ideal: 30 } },
     });
-    local.cam?.stop();
-    local.cam = s.getVideoTracks()[0];
-    replaceAll(1, local.cam);
+    stopCamTracks();
+    local.camRaw = s.getVideoTracks()[0];
+    local.cam = local.camRaw;
+    if (effect) await applyBackground();
+    else replaceAll(1, local.cam);
     return true;
   } catch (e) {
     console.warn('Câmera indisponível', e);
@@ -150,11 +184,29 @@ export async function startCam() {
   }
 }
 
-export function stopCam() {
-  local.cam?.stop();
+function stopCamTracks() {
+  bgProcessor?.stop(); bgProcessor = null;
+  local.camRaw?.stop();
+  if (local.cam && local.cam !== local.camRaw) local.cam.stop();
+  local.camRaw = null;
   local.cam = null;
+}
+
+export function stopCam() {
+  stopCamTracks();
   replaceAll(1, null);
 }
+
+// Troca o fundo (salva a escolha; aplica na hora se a câmera estiver ligada)
+export async function setCameraBackground(bg) {
+  const hadEffect = hasEffect(getBackground());
+  setBackgroundPref(bg);
+  if (!local.camRaw) return;
+  // Sair do "sem efeito" para um efeito: reabre a câmera em 720p para ficar leve
+  if (!hadEffect && hasEffect(bg) && (local.camRaw.getSettings().width || 0) > 1280) { await startCam(); emit('tiles'); return; }
+  await applyBackground();
+}
+export { getBackground };
 
 function applyMic() { if (local.mic) local.mic.enabled = micLive(); }
 
@@ -241,7 +293,7 @@ function stopScreen() {
 
 export function stopAllMedia() {
   local.mic?.stop(); local.mic = null;
-  local.cam?.stop(); local.cam = null;
+  stopCamTracks();
   local.screen?.stop(); local.screen = null;
   local.screenAudio?.stop(); local.screenAudio = null;
   stopWatching(state.me);

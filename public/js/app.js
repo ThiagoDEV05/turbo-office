@@ -459,6 +459,8 @@ function bindEvents() {
   $('#adminBtn').onclick = () => ui.openServerSettings();
   $('#serverName').onclick = () => { if (myRank() >= 2) ui.openServerSettings(); };
   $('#composer').onsubmit = (e) => { e.preventDefault(); chat.sendMessage(); };
+  $('#cCamBg').onclick = (e) => { e.stopPropagation(); ui.openBackgroundMenu(e.currentTarget); };
+  on('bg-error', () => ui.toast({ title: 'Fundo virtual indisponível', body: 'Não consegui carregar o recorte de fundo neste navegador. A câmera continua normal. Use o Chrome ou o Edge atualizados.' }));
   $('#vcComposer').onsubmit = (e) => { e.preventDefault(); chat.sendVoiceMessage(); };
   $('#cChat').onclick = () => { chat.setVoiceChatOpen(!chat.isVoiceChatOpen()); renderAll(); if (chat.voiceChatKey()) setTimeout(() => $('#vcInput').focus(), 0); };
   $('#vcClose').onclick = () => { chat.setVoiceChatOpen(false); renderAll(); };

@@ -6,9 +6,10 @@ import {
 import {
   local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
   getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality, SCREEN_PRESETS,
-  isLocalMuted, setLocalMute, getStreamVolume, setStreamVolume, isStreamMuted, setStreamMuted,
+  isLocalMuted, setLocalMute, getStreamVolume, setStreamVolume, isStreamMuted, setStreamMuted, setCameraBackground,
 } from './rtc.js';
 import { THEMES, GRADIENTS, ACCENTS, getPrefs, applyPrefs } from './prefs.js';
+import { PRESETS, presetCanvas, customImageUrl, saveCustomImage, getBackground, preload as preloadSegmenter } from './background.js';
 
 export const $ = (s) => document.querySelector(s);
 export function h(tag, props = {}, ...children) {
@@ -879,6 +880,9 @@ async function renderVoiceTab(box) {
   const camBtn = h('button', { class: 'btn block', type: 'button' }, 'Testar câmera');
   const audio = getAudioProcessing();
   const q = getScreenQuality();
+  const bgBox = h('div', {});
+  const paintBg = () => { bgBox.innerHTML = ''; bgBox.append(backgroundGrid(paintBg)); };
+  paintBg();
 
   const qRes = h('div', { class: 'quality-grid' });
   const qFps = h('div', { class: 'fps-grid' });
@@ -903,7 +907,8 @@ async function renderVoiceTab(box) {
         switchRow('Transmitir o som junto', 'Manda o som da aba ou do sistema junto com a tela.', q.audio !== false, (v) => setScreenQuality({ audio: v })),
         h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Padrão: 4K a 60 fps com som. O botão de transmitir já usa essa qualidade direto. Se a sua internet não aguentar, baixe aqui.'))),
     h('div', {},
-      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn))));
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Fundo da câmera'), bgBox))));
 
   // listas de dispositivos
   const fill = async () => {
@@ -1079,6 +1084,56 @@ document.addEventListener('pointerdown', (e) => { const m = ctx(); if (m && !m.h
 addEventListener('blur', closeContextMenu);
 addEventListener('resize', closeContextMenu);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
+
+// ------------------------------------------------------------------ Fundo da câmera (como no Discord)
+const thumbCache = new Map();
+function presetThumb(key) {
+  if (thumbCache.has(key)) return thumbCache.get(key);
+  const c = document.createElement('canvas');
+  c.width = 192; c.height = 108;
+  c.getContext('2d').drawImage(presetCanvas(key), 0, 0, 192, 108);
+  const url = c.toDataURL('image/jpeg', 0.8);
+  thumbCache.set(key, url);
+  return url;
+}
+
+// Grade de fundos (usada no menu da câmera e nas configurações)
+export function backgroundGrid(onPick) {
+  const grid = h('div', { class: 'bg-grid' });
+  const current = getBackground();
+  const tile = (value, label, style, extra) => h('button', {
+    class: `bg-tile${current === value ? ' sel' : ''}`, type: 'button', title: label, style,
+    onclick: async () => { await setCameraBackground(value); onPick?.(value); },
+  }, extra || null, h('span', { class: 'bg-label' }, label));
+  grid.append(
+    tile('none', 'Nenhum', '', h('span', { class: 'bg-icon' }, '🚫')),
+    tile('blur-light', 'Desfoque leve', 'background:linear-gradient(135deg,#64748b,#94a3b8)', h('span', { class: 'bg-icon' }, '💧')),
+    tile('blur-strong', 'Desfoque forte', 'background:linear-gradient(135deg,#334155,#64748b)', h('span', { class: 'bg-icon' }, '🌫️')),
+    ...Object.entries(PRESETS).map(([k, p]) => tile(`preset:${k}`, p.name, `background-image:url("${presetThumb(k)}")`)));
+  // Imagem própria
+  const custom = customImageUrl();
+  const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    try { await saveCustomImage(f); await setCameraBackground('custom'); onPick?.('custom'); }
+    catch { toast({ title: 'Não consegui usar essa imagem', body: 'Tente um JPG ou PNG.' }); }
+  };
+  if (custom) grid.append(tile('custom', 'Minha imagem', `background-image:url("${custom}")`));
+  grid.append(h('button', { class: 'bg-tile bg-upload', type: 'button', title: 'Enviar sua imagem', onclick: () => input.click() }, h('span', { class: 'bg-icon' }, '＋'), h('span', { class: 'bg-label' }, custom ? 'Trocar imagem' : 'Sua imagem')), input);
+  return grid;
+}
+
+export function openBackgroundMenu(anchor) {
+  preloadSegmenter();
+  const build = (el) => {
+    el.classList.add('bg-pop');
+    el.append(h('div', { class: 'menu-label' }, 'Fundo da câmera'),
+      backgroundGrid(() => { showPopover(anchor, build, 'above'); }),
+      h('div', { class: 'pop-row muted small' }, 'O recorte acontece no seu computador. Fica melhor com o rosto bem iluminado. Todos veem o fundo escolhido.'));
+  };
+  showPopover(anchor, build, 'above');
+}
 
 // ------------------------------------------------------------------ Mover / banir
 export const fmtDate = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });

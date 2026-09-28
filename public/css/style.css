@@ -521,3 +521,17 @@ body.dragging-user .chan.voice:hover, .chan.voice.drop-over { background: color-
 .chan:hover .room-chat, .chan .room-chat.has-unread { display: inline-flex; align-items: center; gap: 3px; }
 .chan .room-chat:hover { opacity: 1; background: var(--hover); }
 .chan .room-chat .badge { position: static; font-size: 10px; line-height: 15px; padding: 0 5px; }
+
+/* Fundo da câmera */
+.ctl-group { display: inline-flex; align-items: center; }
+.call-chev { width: 18px; height: 48px; margin-left: -8px; font-size: 14px; color: var(--muted); background: none; border: 0; border-radius: 8px; }
+.call-chev:hover { color: var(--text); background: var(--hover); }
+.popover.bg-pop { width: 380px; }
+.bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px 6px 8px; }
+.set-sec .bg-grid { grid-template-columns: repeat(3, 1fr); padding: 0; }
+.bg-tile { position: relative; aspect-ratio: 16/9; border-radius: 10px; border: 2px solid var(--line); background: var(--panel-2); background-size: cover; background-position: center; padding: 0; overflow: hidden; display: grid; place-items: center; cursor: pointer; }
+.bg-tile:hover { border-color: var(--muted); }
+.bg-tile.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.bg-icon { font-size: 20px; }
+.bg-label { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10.5px; font-weight: 700; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); padding: 8px 4px 3px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-upload { border-style: dashed; }
