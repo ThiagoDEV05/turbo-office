@@ -6,6 +6,7 @@ export const state = {
   profiles: new Map(),    // id -> { id, email, name, color, role }
   categories: new Map(),  // id -> { id, name, position, min_role }
   rooms: new Map(),       // id -> { id, name, kind, category_id, min_role, write_role, position }
+  bans: new Map(),        // user_id -> { until, reason, by_id } (só Gestor+ carrega)
   presence: new Map(),    // id -> { room, media: {mic,cam,screen}, deaf, status, statusText }
   voiceRoom: null,        // id da sala de voz em que estou
   view: null,             // { type: 'text'|'voice'|'dm', id }
@@ -42,6 +43,11 @@ export function displayName(id) { return state.profiles.get(id)?.name || 'Algué
 export function colorOf(id) {
   const c = state.profiles.get(id)?.color;
   return /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#64748b';
+}
+// URL da foto (validada no banco: só https, sem aspas/parênteses)
+export function photoOf(id) {
+  const u = state.profiles.get(id)?.avatar_url;
+  return typeof u === 'string' && /^https:\/\/[^\s"')]+$/.test(u) ? u : null;
 }
 export function initials(name = '') {
   return name.split(' ').filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('') || '?';

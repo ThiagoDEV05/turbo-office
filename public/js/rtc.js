@@ -2,7 +2,7 @@
 // Cada conexão tem 3 transceivers fixos (áudio, câmera, tela): ligar/desligar usa
 // replaceTrack, sem renegociação. A oferta/resposta vai completa (ICE não-incremental)
 // para gastar poucas mensagens de sinalização.
-import { state, emit, on, displayName, colorOf, initials, membersIn } from './state.js';
+import { state, emit, on, displayName, colorOf, initials, membersIn, photoOf } from './state.js';
 import { sendTo, setMeta } from './net.js';
 
 const SLOTS = ['audio', 'cam', 'screen'];
@@ -15,7 +15,18 @@ export const local = {
   micOn: localStorage.getItem('to.micOn') !== '0',
   micDeviceId: localStorage.getItem('to.mic') || undefined,
   camDeviceId: localStorage.getItem('to.cam') || undefined,
+  speakerDeviceId: localStorage.getItem('to.speaker') || '',
 };
+
+// Escolher a saída de áudio só funciona em navegadores com setSinkId (Chrome, Edge).
+export const canPickSpeaker = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+
+export async function setSpeaker(deviceId) {
+  local.speakerDeviceId = deviceId;
+  localStorage.setItem('to.speaker', deviceId);
+  for (const p of peers.values()) p.audioEl.setSinkId?.(deviceId).catch(() => {});
+  emit('speaker', deviceId);
+}
 
 let iceServers = [];
 const peers = new Map(); // id -> peer
@@ -159,6 +170,7 @@ function createPeer(id, initiator) {
   audioEl.autoplay = true;
   audioEl.muted = state.deafened;
   audioEl.volume = getUserVolume(id);
+  if (local.speakerDeviceId && canPickSpeaker) audioEl.setSinkId(local.speakerDeviceId).catch(() => {});
   const peer = { id, pc, initiator, streams: {}, audioEl, createdAt: Date.now(), staleSince: null };
   peers.set(id, peer);
 
@@ -349,8 +361,9 @@ function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) 
   el.querySelector('.tile-icons').textContent = icons || '';
   el.querySelector('.tile-state').textContent = connecting ? 'Conectando…' : '';
   const ph = el.querySelector('.placeholder span');
-  ph.style.background = colorOf(id);
-  ph.textContent = initials(displayName(id));
+  const photo = photoOf(id);
+  ph.style.background = photo ? `center / cover no-repeat url("${photo}")` : colorOf(id);
+  ph.textContent = photo ? '' : initials(displayName(id));
 }
 
 const sameTrack = (el, track) => el?.querySelector('video').srcObject?.getVideoTracks()[0] === track;

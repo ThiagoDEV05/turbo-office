@@ -15,8 +15,8 @@
     <aside id="left">
       <header class="server-head">
         <img src="/favicon.svg" alt="" width="26" height="26">
-        <span class="server-name" id="serverName">Turbo Office</span>
-        <button class="icon-btn" id="adminBtn" title="Membros e cargos" hidden>⚙</button>
+        <button class="server-name" id="serverName" title="Configurações do servidor">Turbo Office</button>
+        <button class="icon-btn" id="adminBtn" title="Configurações do servidor" hidden>⚙</button>
       </header>
       <nav id="channelList" class="scroll"></nav>
 
@@ -33,8 +33,14 @@
           <span class="avatar sm" id="meAvatar"></span>
           <span class="me-info"><span class="me-name" id="meName"></span><span class="me-status" id="meStatus"></span></span>
         </button>
-        <button class="ctl sm" id="micBtn" title="Microfone (Ctrl+Shift+A)"></button>
-        <button class="ctl sm" id="deafBtn" title="Desativar áudio (Ctrl+Shift+D)"></button>
+        <div class="ctl-pair">
+          <button class="ctl sm" id="micBtn" title="Microfone (Ctrl+Shift+A)"></button>
+          <button class="ctl-chev" id="micMenu" title="Escolher microfone">⌄</button>
+        </div>
+        <div class="ctl-pair">
+          <button class="ctl sm" id="deafBtn" title="Desativar áudio (Ctrl+Shift+D)"></button>
+          <button class="ctl-chev" id="spkMenu" title="Escolher fone/alto-falante">⌄</button>
+        </div>
         <button class="ctl sm" id="settingsBtn" title="Configurações"></button>
       </div>
     </aside>
@@ -136,14 +142,24 @@
     <div class="modal-card settings">
       <div>
         <h2>Configurações</h2>
+        <div class="photo-edit">
+          <span class="avatar xl" id="setPhoto"></span>
+          <div class="photo-actions">
+            <label class="btn" for="photoInput">Enviar foto</label>
+            <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp" hidden>
+            <button class="btn danger-outline" type="button" id="photoRemove">Remover</button>
+            <span class="muted small">JPG, PNG ou WebP. A imagem é recortada em quadrado.</span>
+          </div>
+        </div>
         <label class="field"><span>Seu nome</span><input class="input" id="setName" maxlength="32"></label>
-        <div class="field"><span>Cor do avatar</span><div id="colorSwatches" class="swatches"></div></div>
+        <div class="field"><span>Cor (usada quando não há foto)</span><div id="colorSwatches" class="swatches"></div></div>
         <div class="set-preview"><span class="avatar lg" id="setAvatar"></span><div><div id="setPreviewName" class="strong"></div><div class="muted small" id="setEmail"></div></div></div>
       </div>
       <div>
         <div class="preview off" id="camPreview"><video autoplay playsinline muted></video><div class="preview-off">Câmera desligada</div></div>
         <button class="btn block" id="testCam" type="button">Testar câmera</button>
         <label class="field"><span>Microfone</span><select id="micSelect" class="input"></select></label>
+        <label class="field" id="spkField"><span>Saída de áudio (fone / alto-falante)</span><select id="spkSelect" class="input"></select></label>
         <label class="field"><span>Câmera</span><select id="camSelect" class="input"></select></label>
       </div>
       <div class="modal-actions full">
@@ -155,13 +171,29 @@
     </div>
   </div>
 
-  <!-- Admin: membros e cargos -->
-  <div id="adminModal" class="modal" hidden>
-    <div class="modal-card wide">
-      <div class="modal-top"><h2>Membros e cargos</h2><button class="icon-btn" data-close>✕</button></div>
-      <p class="muted small">Admin: gerencia cargos, salas e modera todos. Gestor: cria/edita salas e muta ou remove Membros das salas de voz. Membro: uso normal.</p>
-      <input class="input" id="adminSearch" placeholder="Buscar por nome ou e-mail…">
-      <div id="adminList" class="scroll"></div>
+  <!-- Configurações do servidor (Gestor+) -->
+  <div id="serverModal" class="modal" hidden>
+    <div class="modal-card server">
+      <nav class="srv-nav">
+        <div class="srv-title" id="srvTitle">Performance Turbo</div>
+        <button class="srv-tab active" data-tab="members">👥 Membros</button>
+        <button class="srv-tab" data-tab="bans">⛔ Banimentos <span class="badge" id="bansCount" hidden></span></button>
+        <button class="srv-tab" data-tab="roles">🛡️ Cargos</button>
+      </nav>
+      <section class="srv-body">
+        <div class="modal-top"><h2 id="srvHeading">Membros</h2><button class="icon-btn" data-close title="Fechar (Esc)">✕</button></div>
+        <div id="srvMembers">
+          <input class="input" id="adminSearch" placeholder="Buscar por nome ou e-mail…">
+          <div id="adminList" class="scroll"></div>
+        </div>
+        <div id="srvBans" hidden><div id="bansList" class="scroll"></div></div>
+        <div id="srvRoles" hidden>
+          <div class="role-card"><span class="role-badge" style="color:#f43f5e">Admin</span><p>Faz tudo: muda cargos, cria e edita categorias e salas, move, muta, remove e bane Gestores e Membros, e vê a categoria "Só os ADMs".</p></div>
+          <div class="role-card"><span class="role-badge" style="color:#f59e0b">Gestor</span><p>Cria e edita categorias e salas; move, muta, remove da sala e bane Membros; apaga mensagens nos canais; escreve em canais restritos como #avisos.</p></div>
+          <div class="role-card"><span class="role-badge">Membro</span><p>Uso normal: entra nas salas, fala, liga câmera, compartilha tela e conversa nos canais liberados.</p></div>
+          <p class="muted small">Para mudar o cargo de alguém, vá em Membros e use o seletor ao lado do nome (só Admin).</p>
+        </div>
+      </section>
     </div>
   </div>
 

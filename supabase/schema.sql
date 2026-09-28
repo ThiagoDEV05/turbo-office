@@ -15,6 +15,18 @@ create table if not exists public.profiles (
   role text not null default 'membro' check (role in ('admin', 'gestor', 'membro')),
   created_at timestamptz not null default now()
 );
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles drop constraint if exists profiles_avatar_url_check;
+alter table public.profiles add constraint profiles_avatar_url_check check (avatar_url is null or avatar_url ~ '^https://[^\s"'')]+$');
+
+-- Banimentos: quem está banido (até "until", ou para sempre se null) perde o acesso a tudo.
+create table if not exists public.bans (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  until timestamptz,
+  reason text check (reason is null or char_length(reason) <= 200),
+  by_id uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
 
 create or replace function public.role_rank(r text) returns int
 language sql immutable as $$
@@ -26,9 +38,19 @@ language sql immutable as $$
   select case when role_rank(a) >= role_rank(b) then a else b end
 $$;
 
+-- Cargo de quem está fazendo a requisição (0 = sem acesso, inclusive se estiver banido)
 create or replace function public.my_rank() returns int
 language sql stable security definer set search_path = public as $$
-  select coalesce((select role_rank(role) from profiles where id = auth.uid()), 0)
+  select coalesce((
+    select role_rank(p.role) from profiles p
+    where p.id = auth.uid()
+      and not exists (select 1 from bans b where b.user_id = p.id and (b.until is null or b.until > now()))
+  ), 0)
+$$;
+
+create or replace function public.rank_of(uid uuid) returns int
+language sql stable security definer set search_path = public as $$
+  select coalesce((select role_rank(role) from profiles where id = uid), 0)
 $$;
 
 -- Só e-mails da Turbo podem criar conta. Para liberar outros domínios, edite a lista abaixo.
@@ -77,7 +99,7 @@ begin
     if my_rank() < 3 then raise exception 'Só Admin pode mudar cargos'; end if;
     if old.id = auth.uid() then raise exception 'Você não pode mudar o próprio cargo'; end if;
   end if;
-  if old.id <> auth.uid() and (new.name <> old.name or new.color <> old.color) then
+  if old.id <> auth.uid() and (new.name <> old.name or new.color <> old.color or new.avatar_url is distinct from old.avatar_url) then
     raise exception 'Só a própria pessoa edita o perfil';
   end if;
   return new;
@@ -217,7 +239,7 @@ language sql stable security definer set search_path = public as $$
   select case
     when ch like 'room:%' then exists (
       select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind = 'text' and my_rank() >= role_rank(r.min_role))
-    when ch like 'dm:%' then auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
+    when ch like 'dm:%' then my_rank() >= 1 and auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
     else false
   end
 $$;
@@ -229,7 +251,7 @@ language sql stable security definer set search_path = public as $$
       select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind = 'text'
         and my_rank() >= role_rank(r.min_role) and my_rank() >= role_rank(r.write_role))
     when ch like 'dm:%' then
-      auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
+      my_rank() >= 1 and auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
       and split_part(ch, ':', 2) < split_part(ch, ':', 3)
       and exists (select 1 from profiles where id::text = split_part(ch, ':', 2))
       and exists (select 1 from profiles where id::text = split_part(ch, ':', 3))
@@ -252,10 +274,15 @@ create policy messages_delete on public.messages for delete to authenticated
 create table if not exists public.mod_actions (
   id bigint generated always as identity primary key,
   target uuid not null references public.profiles(id) on delete cascade,
-  action text not null check (action in ('mute', 'unmute', 'kick')),
+  action text not null check (action in ('mute', 'unmute', 'kick', 'move')),
+  room_id uuid references public.rooms(id) on delete cascade,
   by_id uuid not null default auth.uid() references public.profiles(id) on delete cascade,
   created_at timestamptz not null default now()
 );
+
+alter table public.mod_actions add column if not exists room_id uuid references public.rooms(id) on delete cascade;
+alter table public.mod_actions drop constraint if exists mod_actions_action_check;
+alter table public.mod_actions add constraint mod_actions_action_check check (action in ('mute', 'unmute', 'kick', 'move'));
 
 alter table public.mod_actions enable row level security;
 drop policy if exists mod_read on public.mod_actions;
@@ -264,7 +291,23 @@ create policy mod_read on public.mod_actions for select to authenticated
 drop policy if exists mod_insert on public.mod_actions;
 create policy mod_insert on public.mod_actions for insert to authenticated
   with check (by_id = auth.uid() and my_rank() >= 2
-    and my_rank() > (select role_rank(role) from profiles where id = target));
+    and my_rank() > rank_of(target));
+
+-- Banir/desbanir: Gestor+ e só quem tem cargo abaixo do seu.
+alter table public.bans enable row level security;
+drop policy if exists bans_read on public.bans;
+create policy bans_read on public.bans for select to authenticated
+  using (user_id = auth.uid() or my_rank() >= 2);
+drop policy if exists bans_insert on public.bans;
+create policy bans_insert on public.bans for insert to authenticated
+  with check (my_rank() >= 2 and user_id <> auth.uid() and my_rank() > rank_of(user_id) and by_id = auth.uid());
+drop policy if exists bans_update on public.bans;
+create policy bans_update on public.bans for update to authenticated
+  using (my_rank() >= 2 and my_rank() > rank_of(user_id))
+  with check (my_rank() >= 2 and user_id <> auth.uid() and my_rank() > rank_of(user_id) and by_id = auth.uid());
+drop policy if exists bans_delete on public.bans;
+create policy bans_delete on public.bans for delete to authenticated
+  using (my_rank() >= 2 and my_rank() > rank_of(user_id));
 
 -- ---------------------------------------------------------------- Permissões das tabelas
 -- Explícitas para funcionar mesmo com "Automatically expose new tables" desligado.
@@ -274,13 +317,33 @@ grant select, update on public.profiles to authenticated;
 grant select, insert, update, delete on public.categories, public.rooms to authenticated;
 grant select, insert, delete on public.messages to authenticated;
 grant select, insert on public.mod_actions to authenticated;
-revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions from anon;
+grant select, insert, update, delete on public.bans to authenticated;
+revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions, public.bans from anon;
+
+-- ---------------------------------------------------------------- Fotos de perfil (Storage)
+-- Bucket público "avatars"; cada pessoa só envia/apaga arquivos na pasta com o próprio id.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', true, 2097152, array['image/webp', 'image/jpeg', 'image/png'])
+on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists turbo_avatars_insert on storage.objects;
+create policy turbo_avatars_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists turbo_avatars_update on storage.objects;
+create policy turbo_avatars_update on storage.objects for update to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists turbo_avatars_delete on storage.objects;
+create policy turbo_avatars_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists turbo_avatars_select on storage.objects;
+create policy turbo_avatars_select on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
 -- ---------------------------------------------------------------- Tempo real
 do $$
 declare t text;
 begin
-  foreach t in array array['profiles', 'categories', 'rooms', 'messages', 'mod_actions'] loop
+  foreach t in array array['profiles', 'categories', 'rooms', 'messages', 'mod_actions', 'bans'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;
@@ -290,9 +353,9 @@ end $$;
 -- Canais privados: presença do escritório, caixa de entrada de cada pessoa e eventos do banco.
 drop policy if exists turbo_rt_read on realtime.messages;
 create policy turbo_rt_read on realtime.messages for select to authenticated using (
-  realtime.topic() in ('turbo:lobby', 'turbo:db') or realtime.topic() = 'turbo:user:' || auth.uid()::text
+  public.my_rank() >= 1 and (realtime.topic() in ('turbo:lobby', 'turbo:db') or realtime.topic() = 'turbo:user:' || auth.uid()::text)
 );
 drop policy if exists turbo_rt_write on realtime.messages;
 create policy turbo_rt_write on realtime.messages for insert to authenticated with check (
-  realtime.topic() = 'turbo:lobby' or realtime.topic() like 'turbo:user:%'
+  public.my_rank() >= 1 and (realtime.topic() = 'turbo:lobby' or realtime.topic() like 'turbo:user:%')
 );

@@ -23,6 +23,7 @@ function renderAll() {
     ui.renderControls();
     ui.renderVoiceView();
     $('#adminBtn').hidden = myRank() < 2;
+    ui.renderServerSettings();
   });
 }
 
@@ -53,10 +54,44 @@ async function fetchUnknownProfiles() {
   const missing = [...state.presence.keys()].filter((id) => !state.profiles.has(id));
   if (!missing.length || fetchingProfiles) return;
   fetchingProfiles = true;
-  const { data } = await sb.from('profiles').select('id, email, name, color, role').in('id', missing);
+  const { data } = await sb.from('profiles').select('id, email, name, color, role, avatar_url').in('id', missing);
   fetchingProfiles = false;
   for (const p of data || []) state.profiles.set(p.id, p);
   if (data?.length) { renderAll(); emit('tiles'); }
+}
+
+// Banimentos ativos (Gestor+ vê todos; RLS garante)
+const activeBan = (b) => !b.until || Date.parse(b.until) > Date.now();
+async function loadBans() {
+  if (myRank() < 2) { state.bans = new Map(); return; }
+  const { data } = await sb.from('bans').select('user_id, until, reason, by_id');
+  state.bans = new Map((data || []).filter(activeBan).map((b) => [b.user_id, b]));
+  ui.renderServerSettings();
+}
+
+let banned = false;
+async function showBanned(ban) {
+  if (banned) return;
+  banned = true;
+  $('#layout').hidden = true;
+  document.querySelectorAll('.modal, #popover').forEach((m) => (m.hidden = true));
+  try { leaveVoice(true); } catch {}
+  stopNet().catch(() => {});
+  fail(`⛔ Você foi banido ${ban.until ? `até ${ui.fmtDate(ban.until)}` : 'permanentemente'}${ban.reason ? ` — motivo: ${ban.reason}` : ''}. Fale com um Admin se achar que foi engano.`);
+}
+
+async function checkMyBan() {
+  if (banned || !sb) return;
+  const { data } = await sb.from('bans').select('user_id, until, reason').eq('user_id', state.me).maybeSingle();
+  if (data && activeBan(data)) showBanned(data);
+}
+
+// Barra de membros: aparece nos canais de texto e fica escondida nas salas de voz (cada um guarda a sua preferência)
+const membersKind = () => (state.view?.type === 'voice' ? 'voice' : 'text');
+function applyMembersPref() {
+  const pref = localStorage.getItem(`to.members.${membersKind()}`);
+  const show = pref ? pref === '1' : membersKind() === 'text' && innerWidth >= 1100;
+  $('#layout').classList.toggle('no-members', !show);
 }
 
 // ------------------------------------------------------------------ Navegação
@@ -67,6 +102,7 @@ function selectView(view) {
   $('#textView').hidden = !view || isVoice;
   $('#voiceView').hidden = !isVoice;
   $('#layout').classList.remove('nav-open');
+  applyMembersPref();
   if (view && !isVoice) {
     chat.openChannel(chat.currentKey());
     chat.renderComposer();
@@ -82,16 +118,16 @@ async function joinVoice(roomId) {
   if (state.voiceRoom === roomId) { selectView({ type: 'voice', id: roomId }); return; }
   if (state.voiceRoom) leaveVoice(true);
   rtc.ensureAudioContext();
+  ui.sounds.join();
   state.voiceRoom = roomId;
   state.modMuted = false;
-  prevRoomMembers = new Set();
+  prevRoomMembers = new Set(membersIn(roomId).filter((id) => id !== state.me));
   setMeta({ room: roomId });
   selectView({ type: 'voice', id: roomId });
   if (rtc.local.micOn && !(await rtc.startMic())) {
     ui.toast({ title: 'Microfone bloqueado', body: 'Você entrou só ouvindo. Libere o microfone no navegador para falar.' });
   }
   rtc.publishMedia();
-  ui.sounds.join();
   rtc.updatePeers();
 }
 
@@ -112,10 +148,8 @@ let prevRoomMembers = new Set();
 function checkRoomSounds() {
   if (!state.voiceRoom) { prevRoomMembers = new Set(); return; }
   const cur = new Set(membersIn(state.voiceRoom).filter((id) => id !== state.me));
-  if (prevRoomMembers.size || cur.size) {
-    if ([...cur].some((id) => !prevRoomMembers.has(id))) ui.sounds.join();
-    else if ([...prevRoomMembers].some((id) => !cur.has(id))) ui.sounds.leave();
-  }
+  if ([...cur].some((id) => !prevRoomMembers.has(id))) ui.sounds.peerJoin();
+  else if ([...prevRoomMembers].some((id) => !cur.has(id))) ui.sounds.peerLeave();
   prevRoomMembers = cur;
 }
 
@@ -187,12 +221,46 @@ const actions = {
     await loadRooms();
     return null;
   },
-  async saveProfile({ name, color }) {
-    const { error } = await sb.from('profiles').update({ name, color }).eq('id', state.me);
+  async uploadPhoto(blob) {
+    const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/jpeg' ? 'jpg' : 'webp';
+    const path = `${state.me}/${Date.now()}.${ext}`;
+    const { error } = await sb.storage.from('avatars').upload(path, blob, { contentType: blob.type, cacheControl: '31536000', upsert: false });
+    if (error) return { error: errMsg(error) };
+    return { url: sb.storage.from('avatars').getPublicUrl(path).data.publicUrl };
+  },
+  async saveProfile({ name, color, avatar_url }) {
+    const before = myProfile().avatar_url;
+    const { error } = await sb.from('profiles').update({ name, color, avatar_url }).eq('id', state.me);
     if (error) return errMsg(error);
-    state.profiles.set(state.me, { ...myProfile(), name, color });
+    state.profiles.set(state.me, { ...myProfile(), name, color, avatar_url });
     renderAll();
+    emit('tiles');
+    // Apaga fotos antigas que ficaram na pasta
+    if (before !== avatar_url) {
+      const { data: files } = await sb.storage.from('avatars').list(state.me);
+      const keep = avatar_url?.split('/').pop();
+      const old = (files || []).map((f) => f.name).filter((n) => n !== keep).map((n) => `${state.me}/${n}`);
+      if (old.length) sb.storage.from('avatars').remove(old);
+    }
     return null;
+  },
+  async moveTo(id, roomId) {
+    const { error } = await sb.from('mod_actions').insert({ target: id, action: 'move', room_id: roomId });
+    if (error) return ui.toast({ title: 'Não foi possível mover', body: errMsg(error) });
+    ui.toast({ title: `${displayName(id)} foi movido(a)`, body: `Para 🔊 ${state.rooms.get(roomId)?.name || 'outra sala'}`, timeout: 3000 });
+  },
+  async ban(id, ms, reason) {
+    const until = ms ? new Date(Date.now() + ms).toISOString() : null;
+    const { error } = await sb.from('bans').upsert({ user_id: id, until, reason: reason || null, by_id: state.me });
+    if (error) return ui.toast({ title: 'Não foi possível banir', body: errMsg(error) });
+    ui.toast({ title: `⛔ ${displayName(id)} foi banido(a)`, body: until ? `Até ${ui.fmtDate(until)}` : 'Permanente', timeout: 4000 });
+    await loadBans(); renderAll();
+  },
+  async unban(id) {
+    const { error } = await sb.from('bans').delete().eq('user_id', id);
+    if (error) return ui.toast({ title: 'Não foi possível desbanir', body: errMsg(error) });
+    ui.toast({ title: `✅ ${displayName(id)} foi desbanido(a)`, timeout: 3000 });
+    await loadBans(); renderAll();
   },
   ring(id) {
     sendTo(id, 'ring', { room: state.voiceRoom });
@@ -212,19 +280,25 @@ function bindEvents() {
   on('unread', renderAll);
   on('speaking', renderAll);
   on('media-local', () => ui.renderControls());
-  on('connection', renderAll);
+  on('connection', (ok) => { if (!ok) checkMyBan(); renderAll(); });
   on('open-view', selectView);
 
   on('db:rooms', () => loadRooms());
+  on('db:bans', (p) => {
+    const row = p.new?.user_id ? p.new : null;
+    if (row?.user_id === state.me && activeBan(row)) { showBanned(row); return; }
+    loadBans().then(renderAll);
+  });
   on('db:categories', () => loadRooms());
   on('db:profiles', (p) => {
     const row = p.new;
     if (!row?.id) return;
     const old = state.profiles.get(row.id);
-    state.profiles.set(row.id, { id: row.id, email: row.email, name: row.name, color: row.color, role: row.role });
+    state.profiles.set(row.id, { id: row.id, email: row.email, name: row.name, color: row.color, role: row.role, avatar_url: row.avatar_url });
     if (row.id === state.me && old && old.role !== row.role) {
       ui.toast({ title: `Seu cargo agora é ${ROLES[row.role].label}` });
       loadRooms();
+      loadBans();
     }
     renderAll();
     emit('tiles');
@@ -234,6 +308,7 @@ function bindEvents() {
     if (m.action === 'mute') { rtc.forceMute(true); ui.toast({ title: 'Você foi mutado', body: `Por ${by}.` }); }
     else if (m.action === 'unmute') { rtc.forceMute(false); ui.toast({ title: 'Você pode falar de novo', body: `Desmutado por ${by}.` }); }
     else if (m.action === 'kick' && state.voiceRoom) { leaveVoice(); ui.toast({ title: 'Você foi removido da sala', body: `Por ${by}.` }); }
+    else if (m.action === 'move' && state.rooms.has(m.room_id)) { joinVoice(m.room_id); ui.toast({ title: `${by} te moveu de sala`, body: `Agora você está em 🔊 ${state.rooms.get(m.room_id).name}.` }); }
     renderAll();
   });
   on('inbox:ring', ({ from, room }) => {
@@ -254,8 +329,17 @@ function bindEvents() {
   on('kicked', () => { leaveVoice(true); stopNet(); $('#kicked').hidden = false; });
 
   // Botões
-  const toggleMic = async () => { await rtc.toggleMic(); ui.renderControls(); };
-  const toggleDeaf = () => { rtc.toggleDeaf(); ui.renderControls(); };
+  const toggleMic = async () => {
+    if (state.modMuted) return;
+    const on = await rtc.toggleMic();
+    on ? ui.sounds.unmute() : ui.sounds.mute();
+    ui.renderControls();
+  };
+  const toggleDeaf = () => {
+    rtc.toggleDeaf();
+    state.deafened ? ui.sounds.mute() : ui.sounds.unmute();
+    ui.renderControls();
+  };
   const toggleCam = async () => { if (state.voiceRoom) { await rtc.toggleCam(); ui.renderControls(); } };
   $('#micBtn').onclick = $('#cMic').onclick = toggleMic;
   $('#deafBtn').onclick = $('#cDeaf').onclick = toggleDeaf;
@@ -264,14 +348,17 @@ function bindEvents() {
   $('#cLeave').onclick = $('#vpLeave').onclick = () => leaveVoice();
   $('#lobbyJoin').onclick = () => state.view?.type === 'voice' && joinVoice(state.view.id);
   $('#settingsBtn').onclick = () => ui.openSettings();
+  $('#micMenu').onclick = (e) => { e.stopPropagation(); ui.openDeviceMenu('mic', e.currentTarget); };
+  $('#spkMenu').onclick = (e) => { e.stopPropagation(); ui.openDeviceMenu('spk', e.currentTarget); };
   $('#meBtn').onclick = (e) => { e.stopPropagation(); ui.openStatusMenu(e.currentTarget); };
-  $('#adminBtn').onclick = () => ui.openAdmin();
+  $('#adminBtn').onclick = () => ui.openServerSettings();
+  $('#serverName').onclick = () => { if (myRank() >= 2) ui.openServerSettings(); };
   $('#composer').onsubmit = (e) => { e.preventDefault(); chat.sendMessage(); };
   $('#spotClose').onclick = ui.closeSpotlight;
   $('#navToggle').onclick = () => $('#layout').classList.toggle('nav-open');
   $('#membersToggle').onclick = () => {
     const hidden = $('#layout').classList.toggle('no-members');
-    localStorage.setItem('to.members', hidden ? '0' : '1');
+    localStorage.setItem(`to.members.${membersKind()}`, hidden ? '0' : '1');
   };
 
   addEventListener('keydown', (e) => {
@@ -317,13 +404,16 @@ async function boot() {
   document.title = state.cfg.serverName ? `${state.cfg.serverName} · Turbo Office` : 'Turbo Office';
   sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') location.replace('/login'); });
 
-  const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role');
+  const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role, avatar_url');
   if (error) return fail(`Banco não configurado (${error.message}). Rode supabase/schema.sql no Supabase.`);
   state.profiles = new Map(profiles.map((p) => [p.id, p]));
   if (!state.profiles.has(state.me)) {
     return fail('Seu perfil não foi encontrado. Se a conta foi criada antes do schema.sql, apague o usuário no Supabase (Authentication → Users) e cadastre de novo.');
   }
+  const { data: myBan } = await sb.from('bans').select('user_id, until, reason').eq('user_id', state.me).maybeSingle();
+  if (myBan && activeBan(myBan)) { $('#loading').hidden = false; return showBanned(myBan); }
   await loadRooms();
+  await loadBans();
   await chat.initChat(sb);
   rtc.setIceServers(state.cfg.iceServers || []);
   ui.setActions(actions);
@@ -331,7 +421,6 @@ async function boot() {
   bindEvents();
   await startNet(sb);
 
-  if (localStorage.getItem('to.members') === '0' || (innerWidth < 1100 && localStorage.getItem('to.members') !== '1')) $('#layout').classList.add('no-members');
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem('to.view') || 'null'); } catch {}
   const valid = saved && (saved.type === 'dm' ? state.profiles.has(saved.id) : state.rooms.get(saved.id)?.kind === (saved.type === 'voice' ? 'voice' : 'text'));
@@ -344,6 +433,7 @@ async function boot() {
     document.addEventListener('click', () => Notification.requestPermission().catch(() => {}), { once: true });
   }
   setInterval(rtc.updatePeers, 500);
+  setInterval(checkMyBan, 60e3);
 }
 
 boot();

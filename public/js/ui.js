@@ -1,9 +1,9 @@
 // Renderização da interface: canais, membros, cabeçalho, popovers, modais e notificações.
 import {
-  state, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
-  displayName, colorOf, initials, membersIn, dmOther,
+  state, on, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
+  displayName, colorOf, initials, membersIn, dmOther, photoOf,
 } from './state.js';
-import { local, switchDevice, getUserVolume, setUserVolume } from './rtc.js';
+import { local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker } from './rtc.js';
 
 export const $ = (s) => document.querySelector(s);
 export function h(tag, props = {}, ...children) {
@@ -39,7 +39,10 @@ export function setActions(actions) { A = actions; }
 // ------------------------------------------------------------------ Avatar
 export function avatar(id, size = '', withStatus = false) {
   const p = state.profiles.get(id);
-  const el = h('span', { class: `avatar ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background:${colorOf(id)}` }, initials(p?.name));
+  const photo = photoOf(id);
+  const el = photo
+    ? h('span', { class: `avatar photo ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background-image:url("${photo}")` })
+    : h('span', { class: `avatar ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background:${colorOf(id)}` }, initials(p?.name));
   if (withStatus) {
     const pr = state.presence.get(id);
     el.append(h('span', { class: `st ${pr ? pr.status : 'offline'}` }));
@@ -292,11 +295,18 @@ export function openMemberPopover(id, anchor) {
       range.oninput = () => setUserVolume(id, Number(range.value));
       el.append(h('div', { class: 'menu-label' }, 'Volume para você'), h('div', { class: 'pop-row' }, range));
     }
-    if (canModerate(id) && pr?.room) {
-      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'),
-        h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'mute'); } }, '🔇 Mutar na sala'),
-        h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'unmute'); } }, '🎙️ Desmutar'),
-        h('button', { class: 'menu-item danger', onclick: () => { closePopover(); A.moderate(id, 'kick'); } }, '⏏ Remover da sala'));
+    if (canModerate(id)) {
+      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'));
+      if (pr?.room) {
+        el.append(
+          h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'mute'); } }, '🔇 Mutar na sala'),
+          h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'unmute'); } }, '🎙️ Desmutar'),
+          h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'kick'); } }, '⏏ Remover da sala'));
+      }
+      if (pr) el.append(h('button', { class: 'menu-item', onclick: () => openMoveMenu(id, anchor) }, '↪️ Mover para outra sala…'));
+      const ban = state.bans.get(id);
+      if (ban) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.unban(id); } }, `✅ Desbanir (${banLabel(ban)})`));
+      else el.append(h('button', { class: 'menu-item danger', onclick: () => openBanMenu(id, anchor) }, '⛔ Banir…'));
     }
     if (myRank() === 3) {
       const sel = h('select', { class: 'input' }, ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
@@ -304,6 +314,47 @@ export function openMemberPopover(id, anchor) {
       el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Cargo'), h('div', { class: 'pop-row' }, sel));
     }
   });
+}
+
+async function audioDevices(kind) {
+  const want = kind === 'mic' ? 'audioinput' : 'audiooutput';
+  let list = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === want);
+  if (list.length && !list.some((d) => d.label)) {
+    // Sem permissão ainda o navegador esconde os nomes: pede o microfone rapidinho
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach((t) => t.stop());
+      list = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === want);
+    } catch {}
+  }
+  return list;
+}
+
+export async function openDeviceMenu(kind, anchor) {
+  const list = await audioDevices(kind);
+  showPopover(anchor, (el) => {
+    el.append(h('div', { class: 'menu-label' }, kind === 'mic' ? 'Microfone (entrada)' : 'Fone / alto-falante (saída)'));
+    if (kind === 'spk' && !canPickSpeaker) {
+      el.append(h('div', { class: 'pop-row muted' }, 'Este navegador não deixa escolher a saída de áudio. Use o Chrome ou o Edge, ou troque a saída nas configurações de som do computador.'));
+      return;
+    }
+    if (!list.length) el.append(h('div', { class: 'pop-row muted' }, 'Nenhum dispositivo encontrado.'));
+    const current = (kind === 'mic' ? local.micDeviceId : local.speakerDeviceId) || 'default';
+    const hasCurrent = list.some((d) => d.deviceId === current);
+    list.forEach((d, i) => {
+      const sel = d.deviceId === current || (!hasCurrent && i === 0);
+      el.append(h('button', {
+        class: `dev-item${sel ? ' sel' : ''}`,
+        onclick: async () => {
+          closePopover();
+          if (kind === 'mic') await switchDevice('mic', d.deviceId); else await setSpeaker(d.deviceId);
+          toast({ title: kind === 'mic' ? '🎙️ Microfone alterado' : '🎧 Saída de áudio alterada', body: d.label || 'Dispositivo', timeout: 2500 });
+          if (kind === 'spk') sounds.message();
+        },
+      }, h('span', { class: 'radio' }), h('span', { class: 'lbl' }, d.label || `Dispositivo ${i + 1}`)));
+    });
+    el.append(h('div', { class: 'menu-sep' }), h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings(); } }, '⚙️ Configurações de voz, vídeo e perfil'));
+  }, 'above');
 }
 
 export function openStatusMenu(anchor) {
@@ -331,28 +382,53 @@ export function toast({ title, body, actions = [], timeout = 7000 }) {
   if (timeout) setTimeout(close, timeout);
 }
 
-let beepCtx;
-export function beep(freqs = [880], dur = 0.1) {
+// Sons curtos sintetizados (sem arquivos). Um AudioContext só, liberado no primeiro clique.
+let sfx = null;
+function sfxCtx() {
+  if (!sfx) {
+    sfx = new (window.AudioContext || window.webkitAudioContext)();
+    if (local.speakerDeviceId && sfx.setSinkId) sfx.setSinkId(local.speakerDeviceId).catch(() => {});
+  }
+  if (sfx.state === 'suspended') sfx.resume();
+  return sfx;
+}
+document.addEventListener('pointerdown', () => { try { sfxCtx(); } catch {} }, { once: true, capture: true });
+on('speaker', (id) => sfx?.setSinkId?.(id).catch(() => {}));
+
+// notes: [frequência, início (s), duração (s)]
+function play(notes, { type = 'sine', volume = 0.22 } = {}) {
   try {
-    beepCtx ??= new AudioContext();
-    freqs.forEach((f, i) => {
-      const o = beepCtx.createOscillator(), g = beepCtx.createGain();
-      const t = beepCtx.currentTime + i * (dur + 0.04);
-      o.frequency.value = f; o.type = 'sine';
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g).connect(beepCtx.destination);
-      o.start(t); o.stop(t + dur + 0.02);
-    });
+    const ctx = sfxCtx();
+    const master = ctx.createGain();
+    master.gain.value = volume;
+    master.connect(ctx.destination);
+    for (const [f, start, dur] of notes) {
+      const t = ctx.currentTime + 0.01 + start;
+      for (const [mult, amp, wave] of [[1, 1, type], [2, 0.18, 'sine']]) { // fundamental + harmônico suave
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = wave; o.frequency.setValueAtTime(f * mult, t);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(amp, t + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g).connect(master);
+        o.start(t); o.stop(t + dur + 0.05);
+      }
+    }
   } catch {}
 }
 export const sounds = {
-  join: () => beep([660, 880]),
-  leave: () => beep([880, 560]),
-  message: () => beep([740], 0.08),
-  ring: () => beep([880, 1100, 880, 1100], 0.14),
+  // eu entro / saio da sala
+  join: () => play([[523.25, 0, 0.16], [659.25, 0.09, 0.16], [783.99, 0.18, 0.32]], { type: 'triangle', volume: 0.3 }),
+  leave: () => play([[783.99, 0, 0.16], [659.25, 0.09, 0.16], [440, 0.18, 0.32]], { type: 'triangle', volume: 0.3 }),
+  // outra pessoa entra / sai da minha sala
+  peerJoin: () => play([[659.25, 0, 0.14], [987.77, 0.08, 0.26]], { type: 'triangle', volume: 0.22 }),
+  peerLeave: () => play([[987.77, 0, 0.14], [587.33, 0.08, 0.26]], { type: 'triangle', volume: 0.22 }),
+  mute: () => play([[880, 0, 0.07], [587.33, 0.06, 0.12]], { volume: 0.18 }),
+  unmute: () => play([[587.33, 0, 0.07], [880, 0.06, 0.12]], { volume: 0.18 }),
+  message: () => play([[1046.5, 0, 0.1], [1318.5, 0.07, 0.18]], { volume: 0.16 }),
+  ring: () => play([0, 0.5, 1.0].flatMap((s0) => [[880, s0, 0.18], [1174.66, s0 + 0.16, 0.26]]), { type: 'triangle', volume: 0.3 }),
 };
+export const beep = () => sounds.message();
 
 // ------------------------------------------------------------------ Spotlight
 export function openSpotlight(stream, title) {
@@ -443,24 +519,54 @@ export function openCategoryModal(cat) {
 
 // ------------------------------------------------------------------ Modal: configurações
 let testStream = null;
+// Recorta a imagem em quadrado e reduz para 256px (arquivo pequeno, carrega rápido)
+async function squareImage(file, size = 256) {
+  const bmp = await createImageBitmap(file);
+  const side = Math.min(bmp.width, bmp.height);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
+  return new Promise((resolve) => c.toBlob(resolve, 'image/webp', 0.88));
+}
+
 export function openSettings() {
   const modal = $('#settingsModal');
   const p = myProfile();
-  const draft = { name: p.name, color: p.color };
+  const draft = { name: p.name, color: p.color, avatar_url: p.avatar_url || null };
   const nameInput = $('#setName');
   nameInput.value = draft.name;
   $('#setEmail').textContent = `${p.email} · ${ROLES[p.role].label}`;
   $('#setError').textContent = '';
+  const paint = (el) => {
+    if (draft.avatar_url) { el.className = `${el.className.replace(/\bphoto\b/g, '').trim()} photo`; el.style.background = ''; el.style.backgroundImage = `url("${draft.avatar_url}")`; el.textContent = ''; }
+    else { el.classList.remove('photo'); el.style.backgroundImage = ''; el.style.background = draft.color; el.textContent = initials(draft.name); }
+  };
   const refresh = () => {
-    const av = $('#setAvatar');
-    av.style.background = draft.color;
-    av.textContent = initials(draft.name);
+    paint($('#setAvatar'));
+    paint($('#setPhoto'));
+    $('#photoRemove').hidden = !draft.avatar_url;
     $('#setPreviewName').textContent = draft.name || '—';
     const sw = $('#colorSwatches');
     sw.innerHTML = '';
     for (const c of COLORS) sw.append(h('button', { class: `sw${c === draft.color ? ' sel' : ''}`, type: 'button', style: `background:${c}`, onclick: () => { draft.color = c; refresh(); } }));
   };
   nameInput.oninput = () => { draft.name = nameInput.value; refresh(); };
+  $('#photoInput').value = '';
+  $('#photoInput').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('#setError').textContent = '';
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { $('#setError').textContent = 'Use uma imagem JPG, PNG ou WebP.'; return; }
+    const label = document.querySelector('label[for=photoInput]');
+    label.textContent = 'Enviando…';
+    try {
+      const blob = await squareImage(file);
+      const { url, error } = await A.uploadPhoto(blob);
+      if (error) $('#setError').textContent = error; else { draft.avatar_url = url; refresh(); }
+    } catch { $('#setError').textContent = 'Não foi possível ler essa imagem.'; }
+    label.textContent = 'Enviar foto';
+  };
+  $('#photoRemove').onclick = () => { draft.avatar_url = null; refresh(); };
   refresh();
 
   const preview = $('#camPreview');
@@ -476,13 +582,14 @@ export function openSettings() {
     } catch { $('#setError').textContent = 'Não foi possível acessar a câmera.'; }
   };
   $('#micSelect').onchange = (e) => switchDevice('mic', e.target.value);
+  $('#spkSelect').onchange = (e) => { setSpeaker(e.target.value); sounds.message(); };
   $('#camSelect').onchange = async (e) => { await switchDevice('cam', e.target.value); if (testStream) { stopTest(); $('#testCam').click(); } };
   const close = () => { stopTest(); modal.hidden = true; };
   modal.querySelector('[data-close]').onclick = close;
   $('#setSave').onclick = async () => {
     const name = draft.name.trim();
     if (!name) { $('#setError').textContent = 'Informe seu nome.'; return; }
-    const err = await A.saveProfile({ name, color: draft.color });
+    const err = await A.saveProfile({ name, color: draft.color, avatar_url: draft.avatar_url });
     if (err) $('#setError').textContent = err; else close();
   };
   fillDevices();
@@ -492,7 +599,8 @@ export function openSettings() {
 async function fillDevices() {
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
-    for (const [sel, kind, current] of [['#micSelect', 'audioinput', local.micDeviceId], ['#camSelect', 'videoinput', local.camDeviceId]]) {
+    $('#spkField').hidden = !canPickSpeaker;
+    for (const [sel, kind, current] of [['#micSelect', 'audioinput', local.micDeviceId], ['#spkSelect', 'audiooutput', local.speakerDeviceId], ['#camSelect', 'videoinput', local.camDeviceId]]) {
       const el = $(sel);
       const list = devs.filter((d) => d.kind === kind);
       el.innerHTML = '';
@@ -503,27 +611,113 @@ async function fillDevices() {
   } catch {}
 }
 
-// ------------------------------------------------------------------ Modal: admin (membros e cargos)
-export function openAdmin() {
-  const modal = $('#adminModal');
-  const search = $('#adminSearch');
-  const render = () => {
-    const term = search.value.trim().toLowerCase();
+// ------------------------------------------------------------------ Mover / banir
+export const fmtDate = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+export const banLabel = (ban) => (ban.until ? `até ${fmtDate(ban.until)}` : 'permanente');
+
+function openMoveMenu(id, anchor) {
+  showPopover(anchor, (el) => {
+    el.append(h('div', { class: 'menu-label' }, `Mover ${displayName(id)} para…`));
+    const current = state.presence.get(id)?.room;
+    const cats = [...state.categories.values()].sort((a, b) => a.position - b.position);
+    const voice = [...state.rooms.values()].filter((r) => r.kind === 'voice' && r.id !== current);
+    const groups = [...cats.map((c) => [c.name, voice.filter((r) => r.category_id === c.id)]), ['Sem categoria', voice.filter((r) => !r.category_id || !state.categories.has(r.category_id))]];
+    const sel = h('select', { class: 'input' });
+    for (const [name, rooms] of groups) {
+      if (!rooms.length) continue;
+      const og = h('optgroup', { label: name });
+      rooms.sort((a, b) => a.position - b.position).forEach((r) => og.append(h('option', { value: r.id }, r.name)));
+      sel.append(og);
+    }
+    el.append(h('div', { class: 'pop-row' }, sel),
+      h('div', { class: 'pop-row' }, h('button', { class: 'btn primary block', onclick: () => { closePopover(); A.moveTo(id, sel.value); } }, 'Mover')));
+  });
+}
+
+function openBanMenu(id, anchor) {
+  showPopover(anchor, (el) => {
+    el.append(h('div', { class: 'menu-label' }, `Banir ${displayName(id)}`));
+    const reason = h('input', { class: 'input', maxlength: 200, placeholder: 'Motivo (opcional)' });
+    reason.addEventListener('keydown', (e) => e.stopPropagation());
+    el.append(h('div', { class: 'pop-row' }, reason));
+    const opts = [['1 hora', 3600e3], ['1 dia', 86400e3], ['7 dias', 7 * 86400e3], ['30 dias', 30 * 86400e3], ['Permanente', null]];
+    const grid = h('div', { class: 'ban-grid' });
+    for (const [label, ms] of opts) {
+      grid.append(h('button', { class: `btn${ms === null ? ' danger-outline' : ''}`, onclick: async () => {
+        if (!confirm(`Banir ${displayName(id)} (${label})? A pessoa perde o acesso na hora.`)) return;
+        closePopover();
+        await A.ban(id, ms, reason.value.trim());
+      } }, label));
+    }
+    el.append(grid, h('div', { class: 'pop-row muted small' }, 'A pessoa sai da sala e não consegue entrar até o banimento acabar. Dá para desbanir a qualquer momento.'));
+  });
+}
+
+// ------------------------------------------------------------------ Configurações do servidor
+let srvTab = 'members';
+export function openServerSettings(tab = srvTab) {
+  const modal = $('#serverModal');
+  srvTab = tab;
+  $('#srvTitle').textContent = state.cfg?.serverName || 'Turbo Office';
+  const headings = { members: 'Membros', bans: 'Banimentos', roles: 'Cargos e permissões' };
+  modal.querySelectorAll('.srv-tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+    b.onclick = () => openServerSettings(b.dataset.tab);
+  });
+  $('#srvHeading').textContent = headings[tab];
+  $('#srvMembers').hidden = tab !== 'members';
+  $('#srvBans').hidden = tab !== 'bans';
+  $('#srvRoles').hidden = tab !== 'roles';
+  const nBans = state.bans.size;
+  $('#bansCount').hidden = !nBans;
+  $('#bansCount').textContent = String(nBans);
+  modal.querySelector('[data-close]').onclick = () => (modal.hidden = true);
+  $('#adminSearch').oninput = renderServerSettings;
+  modal.hidden = false;
+  renderServerSettings();
+}
+
+export function renderServerSettings() {
+  const modal = $('#serverModal');
+  if (modal.hidden) return;
+  // Não redesenha enquanto a pessoa está usando um seletor/campo da lista
+  if (modal.querySelector('#adminList, #bansList')?.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
+  if (srvTab === 'members') {
+    const term = $('#adminSearch').value.trim().toLowerCase();
     const list = $('#adminList');
+    const scroll = list.scrollTop;
     list.innerHTML = '';
     const people = [...state.profiles.values()]
       .filter((p) => !term || p.name.toLowerCase().includes(term) || p.email.includes(term))
       .sort((a, b) => rank(b.role) - rank(a.role) || a.name.localeCompare(b.name));
+    list.append(h('div', { class: 'muted small', style: 'padding:0 6px 6px' }, `${people.length} ${people.length === 1 ? 'pessoa' : 'pessoas'} · ${[...state.presence.keys()].length} online`));
     for (const p of people) {
-      const sel = h('select', { class: 'input', disabled: p.id === state.me || myRank() < 3 }, ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
-      sel.onchange = async () => { const err = await A.setRole(p.id, sel.value); if (err) { toast({ title: 'Não foi possível mudar o cargo', body: err }); sel.value = p.role; } };
-      list.append(h('div', { class: 'admin-row' }, avatar(p.id, 'sm', true), h('div', { style: 'min-width:0' }, h('div', { class: 'nm' }, p.name + (p.id === state.me ? ' (você)' : '')), h('div', { class: 'em' }, p.email)), sel));
+      const pr = state.presence.get(p.id);
+      const ban = state.bans.get(p.id);
+      const room = pr?.room && state.rooms.get(pr.room);
+      const sel = h('select', { class: 'input', disabled: p.id === state.me || myRank() < 3, title: myRank() < 3 ? 'Só Admin muda cargos' : '' },
+        ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
+      sel.onchange = async () => { const err = await A.setRole(p.id, sel.value); if (err) sel.value = p.role; };
+      const more = h('button', { class: 'icon-btn', title: 'Ações', onclick: (e) => openMemberPopover(p.id, e.currentTarget) }, '⋯');
+      list.append(h('div', { class: 'admin-row' }, avatar(p.id, 'sm', true),
+        h('div', { style: 'min-width:0' },
+          h('div', { class: 'nm' }, p.name + (p.id === state.me ? ' (você)' : ''), ban ? h('span', { class: 'ban-tag' }, `  ⛔ banido ${banLabel(ban)}`) : null),
+          h('div', { class: 'em' }, `${p.email}${pr ? ` · ${room ? `🔊 ${room.name}` : 'online'}` : ''}`)),
+        sel, p.id === state.me ? h('span') : more));
     }
-  };
-  search.oninput = render;
-  modal.querySelector('[data-close]').onclick = () => (modal.hidden = true);
-  render();
-  modal.hidden = false;
+    list.scrollTop = scroll;
+  } else if (srvTab === 'bans') {
+    const list = $('#bansList');
+    list.innerHTML = '';
+    if (!state.bans.size) { list.append(h('div', { class: 'chat-empty' }, 'Ninguém banido. 🎉')); return; }
+    for (const [uid, ban] of state.bans) {
+      list.append(h('div', { class: 'ban-row' }, avatar(uid, 'sm'),
+        h('div', { style: 'min-width:0' },
+          h('div', { class: 'strong' }, displayName(uid)),
+          h('div', { class: 'muted small' }, `${ban.until ? `Até ${fmtDate(ban.until)}` : 'Permanente'} · por ${displayName(ban.by_id)}${ban.reason ? ` · “${ban.reason}”` : ''}`)),
+        h('button', { class: 'btn', onclick: () => A.unban(uid) }, 'Desbanir')));
+    }
+  }
 }
 
 // Fecha popovers/modais ao clicar fora
