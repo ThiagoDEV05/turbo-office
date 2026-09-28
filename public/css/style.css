@@ -342,22 +342,24 @@ input, select { font: inherit; color: inherit; }
 :root[data-glass="on"] .srv-nav, :root[data-glass="on"] .set-nav { background: rgba(127,127,127,.08); }
 
 /* ------------------------------------------------ Molduras animadas do avatar */
-.avatar[data-deco] { isolation: isolate; }
-.avatar[data-deco]::before {
+[data-deco] { isolation: isolate; }
+.tile .placeholder span[data-deco] { position: relative; }
+[data-deco]::before {
   content: ''; position: absolute; inset: -3px; border-radius: 50%; padding: 3px; z-index: -1;
   background: var(--deco); animation: deco-spin 3s linear infinite;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
 }
 .avatar.xs[data-deco]::before { inset: -2px; padding: 2px; }
 .avatar.xl[data-deco]::before, .avatar.lg[data-deco]::before { inset: -5px; padding: 4px; }
-.avatar[data-deco="neon"] { --deco: conic-gradient(#22d3ee, #a855f7, #ec4899, #22d3ee); }
-.avatar[data-deco="fogo"] { --deco: conic-gradient(#facc15, #f97316, #ef4444, #f97316, #facc15); }
-.avatar[data-deco="ouro"] { --deco: conic-gradient(#fef3c7, #d97706, #fde68a, #92400e, #fef3c7); }
-.avatar[data-deco="arco-iris"] { --deco: conic-gradient(#ef4444, #f97316, #eab308, #22c55e, #3b82f6, #8b5cf6, #ef4444); }
-.avatar[data-deco="gelo"] { --deco: conic-gradient(#e0f2fe, #38bdf8, #ffffff, #0ea5e9, #e0f2fe); }
-.avatar[data-deco="turbo"] { --deco: conic-gradient(#22d3ee, #fbbf24, #0b1426, #22d3ee); }
+.tile .placeholder span[data-deco]::before { inset: -6px; padding: 5px; }
+[data-deco="neon"] { --deco: conic-gradient(#22d3ee, #a855f7, #ec4899, #22d3ee); }
+[data-deco="fogo"] { --deco: conic-gradient(#facc15, #f97316, #ef4444, #f97316, #facc15); }
+[data-deco="ouro"] { --deco: conic-gradient(#fef3c7, #d97706, #fde68a, #92400e, #fef3c7); }
+[data-deco="arco-iris"] { --deco: conic-gradient(#ef4444, #f97316, #eab308, #22c55e, #3b82f6, #8b5cf6, #ef4444); }
+[data-deco="gelo"] { --deco: conic-gradient(#e0f2fe, #38bdf8, #ffffff, #0ea5e9, #e0f2fe); }
+[data-deco="turbo"] { --deco: conic-gradient(#22d3ee, #fbbf24, #0b1426, #22d3ee); }
 @keyframes deco-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .avatar[data-deco]::before { animation: none; } }
+@media (prefers-reduced-motion: reduce) { [data-deco]::before { animation: none; } }
 
 /* ------------------------------------------------ Cartão de perfil */
 .popover.profile { width: 320px; padding: 0; overflow: hidden; max-height: 86vh; overflow-y: auto; }

@@ -18,8 +18,9 @@ export const SCREEN_PRESETS = {
   '4k': { label: '4K', w: 3840, h: 2160, bitrate: 18_000_000 },
 };
 const readJSON = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
-export const getScreenQuality = () => readJSON('to.screenq', { res: '1080', fps: 30, audio: true });
-export const setScreenQuality = (patch) => localStorage.setItem('to.screenq', JSON.stringify({ ...getScreenQuality(), ...patch }));
+// Padrão para todo mundo: 4K a 60 fps com som (cada um pode baixar se a rede não aguentar)
+export const getScreenQuality = () => readJSON('to.screenq2', { res: '4k', fps: 60, audio: true });
+export const setScreenQuality = (patch) => localStorage.setItem('to.screenq2', JSON.stringify({ ...getScreenQuality(), ...patch }));
 export const getAudioProcessing = () => readJSON('to.audio', { noiseSuppression: true, echoCancellation: true, autoGainControl: true });
 export async function setAudioProcessing(patch) {
   localStorage.setItem('to.audio', JSON.stringify({ ...getAudioProcessing(), ...patch }));
@@ -71,7 +72,10 @@ function tunePeer(peer) {
   const fpsBoost = q.fps >= 60 ? 1.6 : q.fps <= 15 ? 0.7 : 1;
   if (ts[0]) setEncoding(ts[0].sender, { maxBitrate: 128_000, priority: 'high', networkPriority: 'high' });
   if (ts[1]) setEncoding(ts[1].sender, { maxBitrate: 2_500_000, maxFramerate: 30 });
-  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(preset.bitrate * fpsBoost), maxFramerate: q.fps, priority: 'high' },
+  // Banda total de upload para a tela (~40 Mbps) dividida entre quem está assistindo, mínimo 4 Mbps cada
+  const viewers = Math.max(1, peers.size);
+  const screenBitrate = Math.min(preset.bitrate * fpsBoost, Math.max(4_000_000, 40_000_000 / viewers));
+  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(screenBitrate), maxFramerate: q.fps, priority: 'high' },
     { degradationPreference: q.fps >= 60 ? 'maintain-framerate' : 'maintain-resolution' });
   if (ts[3]) setEncoding(ts[3].sender, { maxBitrate: 256_000 });
 }
@@ -277,7 +281,7 @@ function createPeer(id, initiator) {
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') closePeer(id, true);
-    if (pc.connectionState === 'connected') tunePeer(peer);
+    if (pc.connectionState === 'connected') for (const p of peers.values()) tunePeer(p);
     emit('tiles');
   };
   return peer;
@@ -319,6 +323,7 @@ export function closePeer(id, notify) {
   peer.screenAudioEl.srcObject = null;
   stopWatching(id);
   if (notify) sendTo(id, 'signal', { data: { type: 'bye' } });
+  for (const p of peers.values()) if (p.pc.connectionState === 'connected') tunePeer(p);
   emit('tiles');
 }
 
@@ -487,6 +492,8 @@ function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) 
   const photo = photoOf(id);
   ph.style.background = photo ? `center / cover no-repeat url("${photo}")` : colorOf(id);
   ph.textContent = photo ? '' : initials(displayName(id));
+  const deco = state.profiles.get(id)?.decoration;
+  if (deco) ph.dataset.deco = deco; else delete ph.dataset.deco;
 }
 
 const sameTrack = (el, track) => el?.querySelector('video').srcObject?.getVideoTracks()[0] === track;

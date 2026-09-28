@@ -243,6 +243,7 @@ const actions = {
     state.profiles.set(state.me, me);
     renderAll();
     emit('tiles');
+    chat.renderMessages();
     // Apaga imagens antigas (mantém só a foto e a faixa atuais)
     const keep = new Set([me.avatar_url, me.banner_url].filter(Boolean).map((u) => u.split('/').pop()));
     const { data: files } = await sb.storage.from('avatars').list(state.me);
@@ -321,6 +322,7 @@ function bindEvents() {
     }
     renderAll();
     emit('tiles');
+    chat.renderMessages();
   });
   on('db:mod', (m) => {
     const by = displayName(m.by_id);
