@@ -785,10 +785,27 @@ function renderAppearanceTab(box) {
 }
 
 // ---------------------------------------------------------------- Aba: Agenda
+// Número da conta Google no endereço (…/calendar/u/2/…) para abrir as configurações na conta certa
+const googleAccountIndex = (url) => /calendar\.google\.com\/calendar\/u\/(\d+)\//.exec(url || '')?.[1] ?? '0';
+export const googleCalendarSettingsUrl = (url) => `https://calendar.google.com/calendar/u/${googleAccountIndex(url)}/r/settings`;
+
+// Confere o link antes de salvar; devolve uma explicação se estiver errado
+export function checkCalendarLink(url) {
+  if (!url) return 'Cole o link da agenda.';
+  if (!/^https:\/\//i.test(url)) return 'Cole o link completo (começa com https://).';
+  if (/^https:\/\/calendar\.google\.com\/calendar\/ical\/.+\.ics(\?.*)?$/i.test(url)) return null;
+  if (/calendar\.google\.com/i.test(url)) {
+    return 'Esse é o endereço da PÁGINA da agenda, não o link iCal. Clique em "Abrir configurações do Google Agenda" aqui embaixo, escolha sua agenda na esquerda, desça até "Integrar agenda" e copie o "Endereço secreto no formato iCal" (ele termina com .ics).';
+  }
+  if (/^https:\/\/outlook\.(office365|live|office)\.com\/owa\/calendar\//i.test(url)) return null;
+  if (/^https:\/\/p\d+-caldav\.icloud\.com\//i.test(url)) return null;
+  return 'Link não reconhecido. Use o "Endereço secreto no formato iCal" do Google Agenda (termina com .ics) ou o link ICS do Outlook/iCloud.';
+}
+
 async function renderCalendarTab(box) {
   const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const dayLabel = (iso) => { const d = new Date(iso); const t = new Date(); return d.toDateString() === t.toDateString() ? 'Hoje' : d.toDateString() === new Date(+t + 86400e3).toDateString() ? 'Amanhã' : d.toLocaleDateString('pt-BR'); };
-  const input = h('input', { class: 'input', type: 'url', placeholder: 'https://calendar.google.com/calendar/ical/…/private-…/basic.ics', autocomplete: 'off' });
+  const input = h('input', { class: 'input', type: 'url', placeholder: 'https://calendar.google.com/calendar/ical/…/private-…/basic.ics  (termina com .ics)', autocomplete: 'off' });
   input.addEventListener('keydown', (e) => e.stopPropagation());
   input.value = await A.getCalendarLink();
   const statusBox = h('div', { class: 'set-sec' });
@@ -806,27 +823,30 @@ async function renderCalendarTab(box) {
       statusBox.append(h('div', { class: 'switch-row' }, h('div', {}, h('div', { class: 't' }, `${dayLabel(e.start)} · ${hhmm(e.start)} – ${hhmm(e.end)}`), now ? h('div', { class: 'd', style: 'color:var(--warn)' }, 'Acontecendo agora') : null)));
     }
   };
+  const hint = h('div', { class: 'error', hidden: true });
   const saveBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
     $('#setError').textContent = '';
+    hint.hidden = true;
     saveBtn.disabled = true; saveBtn.textContent = 'Conectando…';
-    const err = await A.saveCalendarLink(input.value);
+    const res = await A.saveCalendarLink(input.value);
     saveBtn.disabled = false; saveBtn.textContent = 'Salvar e conectar';
-    if (err) $('#setError').textContent = err;
-    paint();
+    if (res?.local) { hint.textContent = res.error; hint.hidden = false; openBtn.href = googleCalendarSettingsUrl(input.value); return; } // não salvou
+    paint(); // erros de leitura da agenda aparecem só no quadro de status
   } }, 'Salvar e conectar');
+  const openBtn = h('a', { class: 'btn', href: googleCalendarSettingsUrl(input.value), target: '_blank', rel: 'noopener' }, '⚙️ Abrir configurações do Google Agenda');
+  input.addEventListener('input', () => { hint.hidden = true; openBtn.href = googleCalendarSettingsUrl(input.value); });
   const removeBtn = h('button', { class: 'btn danger-outline', type: 'button', onclick: async () => { await A.removeCalendarLink(); input.value = ''; paint(); } }, 'Desconectar');
   box.append(
     h('p', { class: 'muted', style: 'margin-top:0' }, 'Conecte sua agenda para o time saber quando você está em reunião. Ninguém vê o título nem os detalhes das reuniões: só aparece "📅 Em reunião até 15:30".'),
     h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Como pegar o link no Google Agenda'),
       h('ol', { class: 'muted', style: 'margin:0;padding-left:20px;line-height:1.7;font-size:14px' },
-        h('li', {}, 'Abra calendar.google.com no computador.'),
-        h('li', {}, 'Clique na engrenagem ⚙️ → Configurações.'),
+        h('li', {}, 'Clique em "⚙️ Abrir configurações do Google Agenda" (botão aqui embaixo) — ou, no Google Agenda, engrenagem ⚙️ → Configurações.'),
         h('li', {}, 'Na esquerda, em "Configurações das minhas agendas", clique na sua agenda (seu nome).'),
-        h('li', {}, 'Desça até "Integrar agenda" e copie o "Endereço secreto no formato iCal".'),
+        h('li', {}, 'Desça até "Integrar agenda" e copie o "Endereço secreto no formato iCal" (é um link longo que termina com .ics — não é o endereço da barra do navegador).'),
         h('li', {}, 'Cole aqui embaixo e clique em Salvar.')),
       h('div', { class: 'muted small', style: 'margin-top:8px' }, 'Também funciona com o link ICS do Outlook ou do iCloud. O link fica guardado só para você.')),
-    h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Link secreto da agenda (iCal)'), input,
-      h('div', { class: 'row-gap', style: 'margin-top:10px' }, saveBtn, removeBtn)),
+    h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Link secreto da agenda (iCal)'), input, hint,
+      h('div', { class: 'row-gap', style: 'margin-top:10px' }, saveBtn, removeBtn, openBtn)),
     statusBox);
   on('calendar', () => { if (setTab === 'calendar') paint(); });
   paint();

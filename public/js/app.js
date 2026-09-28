@@ -307,11 +307,12 @@ const actions = {
   },
   async saveCalendarLink(url) {
     const clean = url.trim().replace(/^webcal:\/\//i, 'https://');
-    if (!/^https:\/\//.test(clean)) return 'Cole o link completo (começa com https://).';
+    const invalid = ui.checkCalendarLink(clean);
+    if (invalid) return { error: invalid, local: true };
     const { error } = await sb.from('calendar_links').upsert({ user_id: state.me, ics_url: clean, updated_at: new Date().toISOString() });
-    if (error) return errMsg(error);
+    if (error) return { error: errMsg(error), local: true };
     await loadCalendar();
-    return state.calendar?.error || null;
+    return state.calendar?.error ? { error: state.calendar.error } : null;
   },
   async removeCalendarLink() {
     await sb.from('calendar_links').delete().eq('user_id', state.me);
