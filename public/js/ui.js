@@ -776,7 +776,8 @@ async function renderVoiceTab(box) {
         switchRow('Cancelamento de eco', 'Evita que o som das caixas volte pelo microfone.', audio.echoCancellation, (v) => setAudioProcessing({ echoCancellation: v })),
         switchRow('Ganho automático', 'Ajusta o volume da sua voz sozinho.', audio.autoGainControl, (v) => setAudioProcessing({ autoGainControl: v }))),
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Qualidade padrão ao transmitir a tela'), qRes, h('div', { style: 'height:8px' }), qFps,
-        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Tudo liberado, inclusive 4K 60 fps. Em salas com muita gente, 1080p costuma ficar mais fluido para todos.'))),
+        switchRow('Transmitir o som junto', 'Manda o som da aba ou do sistema junto com a tela.', q.audio !== false, (v) => setScreenQuality({ audio: v })),
+        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Padrão: 4K a 60 fps com som. O botão de transmitir já usa essa qualidade direto. Se a sua internet não aguentar, baixe aqui.'))),
     h('div', {},
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn))));
 
@@ -824,27 +825,6 @@ async function renderVoiceTab(box) {
   on('audio-processing', () => { if (setTab === 'voice' && meterStream) startMeter(); });
   await fill();
   startMeter();
-}
-
-// ---------------------------------------------------------------- Menu de transmissão de tela
-export function openScreenMenu(anchor) {
-  showPopover(anchor, (el) => {
-    const q = { ...getScreenQuality() };
-    el.append(h('div', { class: 'menu-label' }, 'Qualidade da transmissão'));
-    const res = h('div', { class: 'quality-grid', style: 'padding:0 6px' });
-    const fps = h('div', { class: 'fps-grid', style: 'padding:6px 6px 0' });
-    const paint = () => {
-      res.innerHTML = ''; fps.innerHTML = '';
-      for (const [k, v] of Object.entries(SCREEN_PRESETS)) res.append(h('button', { class: `btn${q.res === k ? ' sel' : ''}`, onclick: () => { q.res = k; paint(); } }, v.label));
-      for (const f of [15, 30, 60]) fps.append(h('button', { class: `btn${q.fps === f ? ' sel' : ''}`, onclick: () => { q.fps = f; paint(); } }, `${f} fps`));
-    };
-    paint();
-    const withAudio = h('input', { type: 'checkbox', checked: q.audio !== false });
-    el.append(res, fps,
-      h('label', { class: 'pop-row', style: 'display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer' }, withAudio, 'Transmitir o som também (aba ou sistema)'),
-      h('div', { class: 'pop-row' }, h('button', { class: 'btn primary block', onclick: () => { q.audio = withAudio.checked; setScreenQuality(q); closePopover(); A.startScreen(q); } }, '🖥️ Escolher tela e transmitir')),
-      h('div', { class: 'pop-row muted small' }, 'Dica: para mandar o som de um vídeo, escolha uma aba do Chrome e marque "Compartilhar áudio".'));
-  }, 'above');
 }
 
 // ------------------------------------------------------------------ Mover / banir
