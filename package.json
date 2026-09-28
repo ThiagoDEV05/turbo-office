@@ -1,0 +1,16 @@
+{
+  "name": "turbo-office",
+  "version": "1.0.0",
+  "description": "Escritório virtual da Turbo Partners — avatares, áudio/vídeo por proximidade, salas, tela e chat.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "dev": "node --no-warnings --watch server.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

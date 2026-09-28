@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turbo Office</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="app-body">
+  <canvas id="world"></canvas>
+
+  <div id="videos" class="empty"></div>
+  <div id="locationPill" class="pill"></div>
+  <div id="minimapWrap"><canvas id="minimap" width="224" height="144"></canvas></div>
+  <div id="zoomCtl">
+    <button data-z="1" title="Aproximar">+</button>
+    <button data-z="-1" title="Afastar">−</button>
+  </div>
+
+  <nav id="bottombar">
+    <button id="meBtn" class="me-btn" title="Status e perfil">
+      <canvas id="meAvatar" width="72" height="72"></canvas>
+      <span class="me-info"><span class="me-name"></span><span class="me-status"></span></span>
+    </button>
+    <span class="sep"></span>
+    <button id="micBtn" class="ctl" title="Microfone (Ctrl+Shift+A)"></button>
+    <button id="camBtn" class="ctl" title="Câmera (Ctrl+Shift+V)"></button>
+    <button id="screenBtn" class="ctl" title="Compartilhar tela"></button>
+    <button id="emoteBtn" class="ctl emoji" title="Reações (teclas 1–8)">😀</button>
+    <span class="sep"></span>
+    <button id="peopleBtn" class="ctl" title="Pessoas"><span class="count" id="onlineCount">0</span></button>
+    <button id="chatBtn" class="ctl" title="Chat (Enter)"><span class="badge" id="chatBadge" hidden></span></button>
+    <button id="settingsBtn" class="ctl" title="Configurações"></button>
+  </nav>
+
+  <aside id="sidebar" hidden>
+    <header class="side-head">
+      <div class="side-tabs">
+        <button data-tab="people" class="active">Pessoas</button>
+        <button data-tab="chat">Chat</button>
+      </div>
+      <button class="icon-btn" id="closeSide" title="Fechar">✕</button>
+    </header>
+    <section id="peoplePanel" class="panel">
+      <input id="peopleSearch" class="input" placeholder="Buscar pessoa…" autocomplete="off">
+      <div id="peopleList"></div>
+    </section>
+    <section id="chatPanel" class="panel" hidden>
+      <div id="chatChannels"></div>
+      <div id="chatMessages"></div>
+      <form id="chatForm">
+        <input id="chatInput" class="input" maxlength="2000" autocomplete="off" placeholder="Mensagem para Todos">
+        <button class="btn primary" type="submit" title="Enviar">➤</button>
+      </form>
+    </section>
+  </aside>
+
+  <div id="emotePicker" class="popover" hidden></div>
+  <div id="statusMenu" class="popover" hidden></div>
+  <div id="playerCard" class="popover" hidden></div>
+  <div id="toasts"></div>
+
+  <div id="spotlight" hidden>
+    <div class="spot-inner">
+      <video autoplay playsinline muted></video>
+      <div class="spot-bar"><span id="spotTitle"></span><button class="btn" id="spotClose">Fechar (Esc)</button></div>
+    </div>
+  </div>
+
+  <div id="setupModal" class="modal">
+    <div class="modal-card setup">
+      <div class="setup-media">
+        <div class="preview">
+          <video id="previewVideo" autoplay playsinline muted></video>
+          <div class="preview-off">Câmera desligada</div>
+          <div class="preview-ctl">
+            <button id="pvMic" class="ctl" title="Microfone"></button>
+            <button id="pvCam" class="ctl" title="Câmera"></button>
+          </div>
+        </div>
+        <label class="field"><span>Microfone</span><select id="micSelect" class="input"></select></label>
+        <label class="field"><span>Câmera</span><select id="camSelect" class="input"></select></label>
+      </div>
+      <div class="setup-profile">
+        <h2 id="setupTitle">Bem-vindo ao Turbo Office</h2>
+        <p class="muted small" id="setupSub">Monte seu avatar e confira câmera e microfone antes de entrar.</p>
+        <div class="avatar-edit">
+          <canvas id="avatarCanvas" width="120" height="120"></canvas>
+          <div id="swatches"></div>
+        </div>
+        <label class="field"><span>Seu nome</span><input id="nameInput" class="input" maxlength="32"></label>
+        <div class="setup-actions">
+          <button class="btn" id="setupCancel" hidden>Cancelar</button>
+          <button class="btn primary" id="setupGo">Entrar no escritório</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="kicked" class="modal" hidden>
+    <div class="modal-card narrow center">
+      <h2>Você abriu o Turbo Office em outra aba</h2>
+      <p class="muted">Só uma sessão por pessoa pode ficar ativa.</p>
+      <button class="btn primary" onclick="location.reload()">Usar aqui</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

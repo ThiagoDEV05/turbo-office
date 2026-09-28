@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turbo Office — Entrar</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <div class="brand">
+      <img src="/favicon.svg" alt="" width="40" height="40">
+      <div>
+        <h1>Turbo Office</h1>
+        <p>O escritório virtual da Turbo Partners</p>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-mode="login" role="tab">Entrar</button>
+      <button class="tab" data-mode="register" role="tab">Criar conta</button>
+    </div>
+
+    <form id="authForm" novalidate>
+      <label class="field" id="nameField" hidden>
+        <span>Nome</span>
+        <input name="name" autocomplete="name" maxlength="32" placeholder="Como o time te chama">
+      </label>
+      <label class="field">
+        <span>E-mail da Turbo</span>
+        <input name="email" type="email" autocomplete="email" required placeholder="voce@turbopartners.com.br">
+      </label>
+      <label class="field">
+        <span>Senha</span>
+        <input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="••••••••">
+      </label>
+      <p class="error" id="error" role="alert"></p>
+      <button class="btn primary block" type="submit" id="submitBtn">Entrar</button>
+    </form>
+    <p class="muted small center">Acesso exclusivo para e-mails @turbopartners.com.br</p>
+  </main>
+
+  <script>
+    const form = document.getElementById('authForm');
+    const err = document.getElementById('error');
+    const nameField = document.getElementById('nameField');
+    const submitBtn = document.getElementById('submitBtn');
+    let mode = 'login';
+
+    document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+      mode = t.dataset.mode;
+      document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+      nameField.hidden = mode !== 'register';
+      submitBtn.textContent = mode === 'register' ? 'Criar conta e entrar' : 'Entrar';
+      form.password.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+      err.textContent = '';
+    }));
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      submitBtn.disabled = true;
+      try {
+        const body = { email: form.email.value, password: form.password.value, name: form.name.value };
+        const res = await fetch(`/api/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Não foi possível entrar.');
+        location.href = '/';
+      } catch (ex) {
+        err.textContent = ex.message;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
