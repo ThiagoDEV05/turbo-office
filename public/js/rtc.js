@@ -283,13 +283,13 @@ function createPeer(id, initiator) {
   return peer;
 }
 
-// Espera o ICE terminar de coletar candidatos (ou 2,5 s) para mandar tudo numa mensagem só.
+// Espera o ICE terminar de coletar candidatos (ou 1,2 s) para mandar tudo numa mensagem só.
 function iceGathered(pc) {
   if (pc.iceGatheringState === 'complete') return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => { pc.removeEventListener('icegatheringstatechange', check); clearTimeout(timer); resolve(); };
     const check = () => { if (pc.iceGatheringState === 'complete') done(); };
-    const timer = setTimeout(done, 2500);
+    const timer = setTimeout(done, 1200);
     pc.addEventListener('icegatheringstatechange', check);
   });
 }
@@ -348,28 +348,53 @@ on('inbox:signal', async ({ from, room, data }) => {
       if (peer && peer.pc.signalingState === 'have-local-offer') await peer.pc.setRemoteDescription(data.sdp);
     } else if (data.type === 'bye') {
       closePeer(from, false);
+    } else if (data.type === 'hello') {
+      // O outro lado não recebeu o convite: manda de novo, na hora
+      if (state.me < from && state.voiceRoom && room === state.voiceRoom && membersIn(state.voiceRoom).includes(from)) {
+        closePeer(from, false);
+        connect(from).catch((e) => console.warn(e));
+      }
     }
   } catch (e) {
     console.warn('Erro de sinalização', e);
   }
 });
 
-// Chamado periodicamente: conecta com quem está na minha sala de voz. Só o lado com id
-// menor inicia/encerra (evita ofertas cruzadas); o outro lado apenas responde.
+// Chamado a cada 500 ms: conecta com quem está na minha sala de voz. O lado com id menor
+// envia o convite (oferta); o outro responde. Se o convite não chegar, o outro lado pede
+// um novo ("hello") — assim ninguém fica na sala sem áudio esperando recarregar.
+const waitingSince = new Map();
+const lastHello = new Map();
+const BAD_AFTER = 8000;
+
 export function updatePeers() {
   const room = state.voiceRoom;
+  const now = Date.now();
   const wanted = new Set(room ? membersIn(room).filter((id) => id !== state.me) : []);
   for (const id of wanted) {
     const peer = peers.get(id);
-    if (!peer && state.me < id) connect(id).catch((e) => console.warn(e));
-    // conexão iniciada mas que nunca conectou: tenta de novo
-    if (peer?.initiator && peer.pc.connectionState !== 'connected' && Date.now() - peer.createdAt > 15000) closePeer(id, false);
+    if (peer) {
+      if (peer.pc.connectionState === 'connected') peer.badSince = null;
+      else peer.badSince ??= now;
+    }
+    const stuck = peer && peer.badSince && now - peer.badSince > BAD_AFTER;
+    if (state.me < id) {
+      if (!peer) connect(id).catch((e) => console.warn(e));
+      else if (stuck) closePeer(id, false); // recria no próximo ciclo
+    } else if (!peer || stuck) {
+      if (!waitingSince.has(id)) waitingSince.set(id, now);
+      if (now - waitingSince.get(id) > 3000 && now - (lastHello.get(id) || 0) > 5000) {
+        lastHello.set(id, now);
+        sendTo(id, 'signal', { room, data: { type: 'hello' } });
+      }
+    } else waitingSince.delete(id);
   }
+  for (const id of waitingSince.keys()) if (!wanted.has(id)) waitingSince.delete(id);
   for (const [id, peer] of peers) {
     if (wanted.has(id)) { peer.staleSince = null; continue; }
     // dá uma folga para a presença atualizar antes de derrubar
-    peer.staleSince ??= Date.now();
-    if (Date.now() - peer.staleSince > 3000) closePeer(id, true);
+    peer.staleSince ??= now;
+    if (now - peer.staleSince > 3000) closePeer(id, true);
   }
 }
 

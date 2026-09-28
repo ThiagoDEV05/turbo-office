@@ -2,6 +2,7 @@
 import { getSupabase, getConfig } from './supa.js';
 import { state, on, emit, myProfile, myRank, rank, displayName, membersIn, dmKey, ROLES } from './state.js';
 import { startNet, setMeta, getMeta, sendTo, stopNet } from './net.js';
+import * as net from './net.js';
 import * as rtc from './rtc.js';
 import * as ui from './ui.js';
 import * as chat from './chat.js';
@@ -464,4 +465,4 @@ async function boot() {
 boot();
 
 // Exposto para testes/depuração no console
-window.turbo = { state, rank, rtc };
+window.turbo = { state, rank, rtc, net };
