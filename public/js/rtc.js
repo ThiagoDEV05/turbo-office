@@ -189,12 +189,21 @@ export async function toggleScreen(opts) {
   if (local.screen) { stopScreen(); return false; }
   const q = { ...getScreenQuality(), ...(opts || {}) };
   const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
+  // Continua no Turbo Office ao escolher uma aba/janela (o Chrome pularia para ela por padrão)
+  let controller = null;
+  try {
+    controller = typeof CaptureController !== 'undefined' ? new CaptureController() : null;
+    controller?.setFocusBehavior?.('no-focus-change');
+  } catch {}
   try {
     const s = await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: preset.w }, height: { ideal: preset.h }, frameRate: { ideal: q.fps, max: q.fps } },
       audio: q.audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: 48000, channelCount: 2 } : false,
       systemAudio: 'include', surfaceSwitching: 'include', selfBrowserSurface: 'exclude',
+      ...(controller ? { controller } : {}),
     });
+    // Navegadores mais antigos só aceitam a escolha logo depois da captura começar
+    try { controller?.setFocusBehavior?.('no-focus-change'); } catch {}
     local.screen = s.getVideoTracks()[0];
     local.screen.contentHint = q.fps >= 60 ? 'motion' : 'detail';
     local.screen.onended = stopScreen;
