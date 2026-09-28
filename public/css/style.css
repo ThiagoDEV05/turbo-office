@@ -464,3 +464,14 @@ body.theater .layout, body.theater .layout.no-members { grid-template-columns: 1
 .vm[draggable="true"]:active { cursor: grabbing; }
 body.dragging-user .chan.voice { outline: 1px dashed transparent; }
 body.dragging-user .chan.voice:hover, .chan.voice.drop-over { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); outline: 1px dashed var(--accent); }
+
+/* Volume da transmissão ao passar o mouse (como no Discord) */
+.tile-vol { position: absolute; right: 10px; bottom: 10px; display: none; align-items: center; gap: 8px; background: rgba(0, 0, 0, .7); padding: 6px 10px; border-radius: 10px; z-index: 3; }
+.tile.remote-screen:hover .tile-vol { display: flex; }
+.tile.remote-screen:hover .tile-state { display: none; }
+.tile-vol-btn { background: none; border: 0; font-size: 16px; padding: 0; line-height: 1; color: #fff; }
+.tile-vol input { width: 110px; accent-color: var(--accent); }
+.tile-vol-pct { font-size: 11px; color: #e2e8f0; min-width: 34px; text-align: right; }
+.stage-strip .tile-vol { right: 4px; bottom: 4px; padding: 3px 6px; gap: 4px; }
+.stage-strip .tile-vol input { width: 60px; }
+.stage-strip .tile-vol-pct { display: none; }

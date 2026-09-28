@@ -176,7 +176,14 @@ export function toggleDeaf() {
   publishMedia();
 }
 
-function applyDeaf() { for (const p of peers.values()) { const m = state.deafened || localMuted.has(p.id); p.audioEl.muted = m; p.screenAudioEl.muted = m; } }
+// Voz: silenciada se eu estiver ensurdecido ou tiver silenciado a pessoa.
+// Transmissão: silenciada se eu estiver ensurdecido ou tiver silenciado a transmissão dela.
+function applyDeaf() {
+  for (const p of peers.values()) {
+    p.audioEl.muted = state.deafened || localMuted.has(p.id);
+    p.screenAudioEl.muted = state.deafened || streamMuted.has(p.id);
+  }
+}
 
 export function forceMute(muted) {
   state.modMuted = muted;
@@ -263,12 +270,36 @@ export function setLocalMute(id, muted) {
   emit('tiles');
 }
 
+// Volumes por pessoa, separados como no Discord: voz e transmissão (som da tela). Ficam salvos.
+const loadMap = (k) => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(k) || '{}'))); } catch { return new Map(); } };
+const saveMap = (k, m) => { try { localStorage.setItem(k, JSON.stringify(Object.fromEntries(m))); } catch {} };
+for (const [id, v] of loadMap('to.userVol')) userVolume.set(id, v);
+const streamVolume = loadMap('to.streamVol');
+const streamMuted = new Set((() => { try { return JSON.parse(localStorage.getItem('to.streamMuted') || '[]'); } catch { return []; } })());
+
 export function setUserVolume(id, v) {
   userVolume.set(id, v);
+  saveMap('to.userVol', userVolume);
   const p = peers.get(id);
-  if (p) { p.audioEl.volume = v; p.screenAudioEl.volume = v; }
+  if (p) p.audioEl.volume = v;
 }
 export const getUserVolume = (id) => userVolume.get(id) ?? 1;
+
+export function setStreamVolume(id, v) {
+  streamVolume.set(id, v);
+  saveMap('to.streamVol', streamVolume);
+  const p = peers.get(id);
+  if (p) p.screenAudioEl.volume = v;
+  emit('stream-volume', id);
+}
+export const getStreamVolume = (id) => streamVolume.get(id) ?? 1;
+export const isStreamMuted = (id) => streamMuted.has(id);
+export function setStreamMuted(id, muted) {
+  muted ? streamMuted.add(id) : streamMuted.delete(id);
+  try { localStorage.setItem('to.streamMuted', JSON.stringify([...streamMuted])); } catch {}
+  applyDeaf();
+  emit('stream-volume', id);
+}
 
 function replaceAll(slot, track) {
   for (const peer of peers.values()) peer.pc.getTransceivers()[slot]?.sender.replaceTrack(track).catch(() => {});
@@ -283,8 +314,8 @@ function createPeer(id, initiator) {
   audioEl.volume = getUserVolume(id);
   const screenAudioEl = new Audio();
   screenAudioEl.autoplay = true;
-  screenAudioEl.muted = state.deafened || localMuted.has(id);
-  screenAudioEl.volume = getUserVolume(id);
+  screenAudioEl.muted = state.deafened || streamMuted.has(id);
+  screenAudioEl.volume = getStreamVolume(id);
   if (local.speakerDeviceId && canPickSpeaker) for (const el of [audioEl, screenAudioEl]) el.setSinkId(local.speakerDeviceId).catch(() => {});
   const peer = { id, pc, initiator, streams: {}, audioEl, screenAudioEl, createdAt: Date.now(), staleSince: null };
   peers.set(id, peer);
@@ -487,7 +518,7 @@ export function updatePeers() {
 export function closeAll() { for (const id of [...peers.keys()]) closePeer(id, true); }
 export const peerState = (id) => peers.get(id)?.pc.connectionState || null;
 // Diagnóstico (console): turbo.rtc.debugPeers()
-export const debugPeers = () => [...peers.values()].map((p) => ({ id: p.id, state: p.pc.connectionState, relayed: !!p.relayed, pc: p.pc }));
+export const debugPeers = () => [...peers.values()].map((p) => ({ id: p.id, state: p.pc.connectionState, relayed: !!p.relayed, pc: p.pc, voice: { volume: p.audioEl.volume, muted: p.audioEl.muted }, stream: { volume: p.screenAudioEl.volume, muted: p.screenAudioEl.muted } }));
 
 // ------------------------------------------------------------------ Quem está falando
 const analysers = new Map();
@@ -595,6 +626,27 @@ function makeTile(key) {
     }),
     tileButton('✕', 'Sair do destaque', () => { focusKey = null; userChoseFocus = true; toggleTheater(false); if (document.fullscreenElement) document.exitFullscreen(); renderStage(); }),
   );
+  // Volume da transmissão ao passar o mouse (só em telas de outras pessoas)
+  if (key.startsWith('screen:')) {
+    const uid = key.slice(7);
+    const vol = document.createElement('div');
+    vol.className = 'tile-vol';
+    vol.innerHTML = '<button type="button" class="tile-vol-btn" title="Silenciar transmissão"></button><input type="range" min="0" max="1" step="0.05" title="Volume da transmissão"><span class="tile-vol-pct"></span>';
+    const [btn, range, pct] = vol.children;
+    const paint = () => {
+      const muted = isStreamMuted(uid), v = getStreamVolume(uid);
+      btn.textContent = muted || v === 0 ? '🔇' : v < 0.5 ? '🔉' : '🔊';
+      btn.title = muted ? 'Voltar o som da transmissão' : 'Silenciar transmissão';
+      range.value = muted ? 0 : v;
+      pct.textContent = muted ? 'mudo' : `${Math.round(v * 100)}%`;
+    };
+    range.addEventListener('input', () => { if (isStreamMuted(uid)) setStreamMuted(uid, false); setStreamVolume(uid, Number(range.value)); });
+    btn.addEventListener('click', () => setStreamMuted(uid, !isStreamMuted(uid)));
+    for (const ev of ['click', 'dblclick', 'pointerdown']) vol.addEventListener(ev, (e) => e.stopPropagation());
+    on('stream-volume', (id) => { if (id === uid) paint(); });
+    paint();
+    el.append(vol);
+  }
   // Clique no quadradinho: coloca em destaque
   el.addEventListener('click', () => { if (focusKey !== key) setFocus(key); });
   el.addEventListener('dblclick', () => { if (el.classList.contains('focused')) el.requestFullscreen?.().catch(() => {}); });
@@ -625,6 +677,7 @@ function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) 
   if (stream) v.play().catch(() => {});
   el.classList.toggle('novideo', !stream);
   el.classList.toggle('screen', !!isScreen);
+  el.classList.toggle('remote-screen', !!isScreen && id !== state.me);
   el.classList.toggle('mirror', !!mirror);
   el.querySelector('.tile-name').textContent = name;
   el.querySelector('.tile-icons').textContent = icons || '';

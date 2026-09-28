@@ -6,7 +6,7 @@ import {
 import {
   local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
   getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality, SCREEN_PRESETS,
-  isLocalMuted, setLocalMute,
+  isLocalMuted, setLocalMute, getStreamVolume, setStreamVolume, isStreamMuted, setStreamMuted,
 } from './rtc.js';
 import { THEMES, GRADIENTS, ACCENTS, getPrefs, applyPrefs } from './prefs.js';
 
@@ -378,9 +378,8 @@ export function openMemberPopover(id, anchor) {
     if (pr && state.voiceRoom && pr.room !== state.voiceRoom) box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.ring(id); } }, '🔔 Chamar para minha sala'));
     if (pr?.room && pr.room !== state.voiceRoom && state.rooms.has(pr.room)) box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.joinVoice(pr.room); } }, `🔊 Entrar em ${room.name}`));
     if (state.voiceRoom && pr?.room === state.voiceRoom) {
-      const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: getUserVolume(id) });
-      range.oninput = () => setUserVolume(id, Number(range.value));
-      box.append(h('div', { class: 'menu-label' }, 'Volume para você'), h('div', { class: 'pop-row' }, range));
+      box.append(h('div', { class: 'menu-label' }, '🎙️ Volume da voz'), h('div', { class: 'pop-row' }, volumeRow(() => getUserVolume(id), (v) => setUserVolume(id, v))));
+      if (pr.media?.screen) box.append(h('div', { class: 'menu-label' }, '🖥️ Volume da transmissão'), h('div', { class: 'pop-row' }, volumeRow(() => getStreamVolume(id), (v) => { if (isStreamMuted(id)) setStreamMuted(id, false); setStreamVolume(id, v); })));
     }
     if (canModerate(id)) {
       box.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'));
@@ -974,7 +973,25 @@ function ctxSub(label, build) {
 const ctxSep = () => h('div', { class: 'ctx-sep' });
 const ctxLabel = (t) => h('div', { class: 'ctx-title' }, t);
 
-export function openUserMenu(id, x, y) {
+// Linha de volume com porcentagem (usada para voz e para transmissão)
+function volumeRow(get, set) {
+  const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: get() });
+  const pct = h('span', { class: 'muted small' }, `${Math.round(get() * 100)}%`);
+  range.oninput = () => { set(Number(range.value)); pct.textContent = `${Math.round(range.value * 100)}%`; };
+  range.addEventListener('click', (e) => e.stopPropagation());
+  return h('div', { class: 'ctx-range' }, range, pct);
+}
+function streamSection(m, id) {
+  m.append(ctxSep(), ctxLabel('🖥️ Volume da transmissão'),
+    volumeRow(() => getStreamVolume(id), (v) => { if (isStreamMuted(id)) setStreamMuted(id, false); setStreamVolume(id, v); }),
+    ctxItem('🔇 Silenciar transmissão', () => setStreamMuted(id, !isStreamMuted(id)), { checked: isStreamMuted(id) }));
+}
+function voiceSection(m, id) {
+  m.append(ctxSep(), ctxLabel('🎙️ Volume da voz'), volumeRow(() => getUserVolume(id), (v) => setUserVolume(id, v)),
+    ctxItem('🔕 Silenciar voz para mim', () => setLocalMute(id, !isLocalMuted(id)), { checked: isLocalMuted(id) }));
+}
+
+export function openUserMenu(id, x, y, { stream = false } = {}) {
   const p = state.profiles.get(id);
   if (!p) return;
   closePopover();
@@ -993,15 +1010,11 @@ export function openUserMenu(id, x, y) {
     m.append(ctxItem('💬 Mensagem', () => A.selectView({ type: 'dm', id })));
     if (pr && state.voiceRoom && pr.room !== state.voiceRoom) m.append(ctxItem('🔔 Chamar para minha sala', () => A.ring(id)));
     if (room && pr.room !== state.voiceRoom) m.append(ctxItem(`🔊 Entrar em ${room.name}`, () => A.joinVoice(pr.room)));
-    if (sameRoom) {
-      m.append(ctxSep(), ctxLabel('Volume do usuário'));
-      const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: getUserVolume(id) });
-      const pct = h('span', { class: 'muted small' }, `${Math.round(getUserVolume(id) * 100)}%`);
-      range.oninput = () => { setUserVolume(id, Number(range.value)); pct.textContent = `${Math.round(range.value * 100)}%`; };
-      range.addEventListener('click', (e) => e.stopPropagation());
-      m.append(h('div', { class: 'ctx-range' }, range, pct));
-    }
-    m.append(ctxItem('🔕 Silenciar para mim', () => setLocalMute(id, !isLocalMuted(id)), { checked: isLocalMuted(id) }));
+    // Volumes separados como no Discord. Clique direito na transmissão → transmissão primeiro.
+    const streaming = sameRoom && pr?.media?.screen;
+    if (stream && streaming) { streamSection(m, id); voiceSection(m, id); }
+    else if (sameRoom) { voiceSection(m, id); if (streaming) streamSection(m, id); }
+    else m.append(ctxItem('🔕 Silenciar para mim', () => setLocalMute(id, !isLocalMuted(id)), { checked: isLocalMuted(id) }));
   }
 
   if (canModerate(id)) {
@@ -1046,7 +1059,9 @@ document.addEventListener('contextmenu', (e) => {
   const id = el?.dataset.uid;
   if (!id || !state.profiles.has(id)) { closeContextMenu(); return; }
   e.preventDefault();
-  openUserMenu(id, e.clientX, e.clientY);
+  // Em cima de uma transmissão (tela) de outra pessoa → menu com o volume da transmissão primeiro
+  const stream = !!el.closest('.tile')?.dataset.key?.startsWith('screen:');
+  openUserMenu(id, e.clientX, e.clientY, { stream });
 });
 document.addEventListener('pointerdown', (e) => { const m = ctx(); if (m && !m.hidden && !m.contains(e.target)) closeContextMenu(); });
 addEventListener('blur', closeContextMenu);
