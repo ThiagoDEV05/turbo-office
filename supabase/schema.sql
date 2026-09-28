@@ -266,6 +266,16 @@ create policy mod_insert on public.mod_actions for insert to authenticated
   with check (by_id = auth.uid() and my_rank() >= 2
     and my_rank() > (select role_rank(role) from profiles where id = target));
 
+-- ---------------------------------------------------------------- Permissões das tabelas
+-- Explícitas para funcionar mesmo com "Automatically expose new tables" desligado.
+-- Quem pode o quê, linha a linha, é decidido pelas políticas RLS acima.
+grant usage on schema public to authenticated;
+grant select, update on public.profiles to authenticated;
+grant select, insert, update, delete on public.categories, public.rooms to authenticated;
+grant select, insert, delete on public.messages to authenticated;
+grant select, insert on public.mod_actions to authenticated;
+revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions from anon;
+
 -- ---------------------------------------------------------------- Tempo real
 do $$
 declare t text;

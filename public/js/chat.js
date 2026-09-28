@@ -119,7 +119,7 @@ export function renderComposer() {
   if (key?.startsWith('room:')) {
     const r = state.rooms.get(key.slice(5));
     can = !!r && myRank() >= rank(r.write_role);
-    placeholder = can ? `Mensagem em #${r?.name}` : `Só ${ROLES[r?.write_role]?.label || ''}s ou acima podem escrever aqui`;
+    placeholder = can ? `Mensagem em #${r?.name}` : `Só ${ROLES[r?.write_role]?.plural || ''} ou acima podem escrever aqui`;
   } else if (key) placeholder = `Mensagem para ${displayName(dmOther(key))}`;
   input.disabled = !can;
   input.placeholder = placeholder;

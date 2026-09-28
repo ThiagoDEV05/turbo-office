@@ -47,6 +47,18 @@ function defaultView() {
   return text[0] ? { type: 'text', id: text[0].id } : null;
 }
 
+// Alguém entrou online mas o perfil ainda não está carregado (ex.: acabou de se cadastrar)
+let fetchingProfiles = false;
+async function fetchUnknownProfiles() {
+  const missing = [...state.presence.keys()].filter((id) => !state.profiles.has(id));
+  if (!missing.length || fetchingProfiles) return;
+  fetchingProfiles = true;
+  const { data } = await sb.from('profiles').select('id, email, name, color, role').in('id', missing);
+  fetchingProfiles = false;
+  for (const p of data || []) state.profiles.set(p.id, p);
+  if (data?.length) { renderAll(); emit('tiles'); }
+}
+
 // ------------------------------------------------------------------ Navegação
 function selectView(view) {
   state.view = view;
@@ -196,7 +208,7 @@ const actions = {
 
 // ------------------------------------------------------------------ Eventos
 function bindEvents() {
-  on('presence', () => { checkRoomSounds(); renderAll(); });
+  on('presence', () => { checkRoomSounds(); fetchUnknownProfiles(); renderAll(); });
   on('unread', renderAll);
   on('speaking', renderAll);
   on('media-local', () => ui.renderControls());

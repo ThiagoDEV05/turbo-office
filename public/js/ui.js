@@ -144,7 +144,7 @@ export function renderMembers() {
   for (const role of ['admin', 'gestor', 'membro']) {
     const group = online.filter((p) => p.role === role);
     if (!group.length) continue;
-    list.append(h('div', { class: 'sec-head' }, `${ROLES[role].label}s — ${group.length}`));
+    list.append(h('div', { class: 'sec-head' }, `${ROLES[role].plural} — ${group.length}`));
     for (const p of group) list.append(memberRow(p, true));
   }
   if (offline.length) {
@@ -369,7 +369,7 @@ function roleOptions(select, current) {
   select.innerHTML = '';
   for (const r of ['membro', 'gestor', 'admin']) {
     if (rank(r) > myRank()) continue;
-    select.append(h('option', { value: r, selected: r === current }, r === 'membro' ? 'Todos' : `${ROLES[r].label}s ou acima`));
+    select.append(h('option', { value: r, selected: r === current }, r === 'membro' ? 'Todos' : `${ROLES[r].plural} ou acima`));
   }
 }
 

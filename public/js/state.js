@@ -20,9 +20,9 @@ export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { 
 export const on = (name, fn) => bus.addEventListener(name, (e) => fn(e.detail));
 
 export const ROLES = {
-  admin: { label: 'Admin', rank: 3, color: '#f43f5e' },
-  gestor: { label: 'Gestor', rank: 2, color: '#f59e0b' },
-  membro: { label: 'Membro', rank: 1, color: '#94a3b8' },
+  admin: { label: 'Admin', plural: 'Admins', rank: 3, color: '#f43f5e' },
+  gestor: { label: 'Gestor', plural: 'Gestores', rank: 2, color: '#f59e0b' },
+  membro: { label: 'Membro', plural: 'Membros', rank: 1, color: '#94a3b8' },
 };
 export const rank = (role) => ROLES[role]?.rank || 0;
 export const myProfile = () => state.profiles.get(state.me);
