@@ -458,3 +458,9 @@ body.theater .layout, body.theater .layout.no-members { grid-template-columns: 1
 .ctx-sub.left { left: auto; right: calc(100% + 4px); }
 .ctx-item.has-sub:hover > .ctx-sub, .ctx-item.has-sub:focus-within > .ctx-sub { display: block; }
 .ctx-item.has-sub:hover { background: var(--hover); color: var(--text); }
+
+/* Arrastar pessoa para outra sala */
+.vm[draggable="true"] { cursor: grab; }
+.vm[draggable="true"]:active { cursor: grabbing; }
+body.dragging-user .chan.voice { outline: 1px dashed transparent; }
+body.dragging-user .chan.voice:hover, .chan.voice.drop-over { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); outline: 1px dashed var(--accent); }

@@ -104,6 +104,46 @@ const viewType = (r) => (r.kind === 'text' ? 'text' : 'voice');
 let collapsed = new Set();
 try { collapsed = new Set(JSON.parse(localStorage.getItem('to.collapsed') || '[]')); } catch {}
 let lastUnreadOf = () => 0;
+
+// ---- Arrastar pessoa para outra sala (como no Discord)
+let draggingUid = null;
+let renderPending = false;
+const dropTarget = (e) => e.target.closest?.('#channelList .chan.voice[data-room]');
+const clearDropHighlight = () => document.querySelectorAll('.chan.drop-over').forEach((el) => el.classList.remove('drop-over'));
+document.addEventListener('dragstart', (e) => {
+  const el = e.target.closest?.('#channelList .vm[draggable="true"]');
+  if (!el) return;
+  draggingUid = el.dataset.uid;
+  e.dataTransfer.setData('text/plain', displayName(draggingUid));
+  e.dataTransfer.effectAllowed = 'move';
+  document.body.classList.add('dragging-user');
+  closePopover();
+});
+document.addEventListener('dragend', () => {
+  draggingUid = null;
+  document.body.classList.remove('dragging-user');
+  clearDropHighlight();
+  if (renderPending) { renderPending = false; renderChannels(lastUnreadOf); }
+});
+document.addEventListener('dragover', (e) => {
+  if (!draggingUid) return;
+  const t = dropTarget(e);
+  if (!t) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (!t.classList.contains('drop-over')) { clearDropHighlight(); t.classList.add('drop-over'); }
+});
+document.addEventListener('dragleave', (e) => { const t = dropTarget(e); if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop-over'); });
+document.addEventListener('drop', (e) => {
+  const t = dropTarget(e);
+  const uid = draggingUid;
+  if (!t || !uid) return;
+  e.preventDefault();
+  clearDropHighlight();
+  const room = t.dataset.room;
+  if (state.presence.get(uid)?.room === room) return;
+  if (uid === state.me) A.joinVoice(room); else A.moveTo(uid, room);
+});
 function toggleCollapsed(id) {
   collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
   try { localStorage.setItem('to.collapsed', JSON.stringify([...collapsed])); } catch {}
@@ -122,7 +162,7 @@ function roomEntry(r, unreadOf) {
   }
   const inside = membersIn(r.id);
   const here = state.voiceRoom === r.id;
-  const btn = h('button', { class: `chan voice${isActive('voice', r.id) ? ' active' : ''}${here ? ' here' : ''}`, onclick: () => A.joinVoice(r.id), title: here ? 'Você está nesta sala' : 'Entrar na sala' },
+  const btn = h('button', { class: `chan voice${isActive('voice', r.id) ? ' active' : ''}${here ? ' here' : ''}`, 'data-room': r.id, onclick: () => A.joinVoice(r.id), title: here ? 'Você está nesta sala' : 'Entrar na sala' },
     h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, edit);
   btn.querySelector('.ico').innerHTML = icons.speaker;
   const out = [btn];
@@ -131,7 +171,7 @@ function roomEntry(r, unreadOf) {
     for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
       const p = state.presence.get(id);
       const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
-      list.append(h('div', { class: 'vm', 'data-uid': id, onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
+      list.append(h('div', { class: 'vm', 'data-uid': id, draggable: id === state.me || canModerate(id) ? 'true' : null, title: id === state.me || canModerate(id) ? 'Arraste para outra sala' : null, onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
     }
     out.push(list);
   }
@@ -140,6 +180,7 @@ function roomEntry(r, unreadOf) {
 
 export function renderChannels(unreadOf) {
   lastUnreadOf = unreadOf;
+  if (draggingUid) { renderPending = true; return; } // não redesenha no meio de um arraste
   const nav = $('#channelList');
   const scroll = nav.scrollTop;
   nav.innerHTML = '';
