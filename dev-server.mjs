@@ -12,16 +12,18 @@ if (fs.existsSync(path.join(root, '.env'))) {
     if (m && !line.trim().startsWith('#')) process.env[m[1]] ??= m[2].replace(/^["']|["']$/g, '');
   }
 }
-const { default: config } = await import('./api/config.js');
+const apis = {};
+for (const f of fs.readdirSync(path.join(root, 'api')).filter((f) => f.endsWith('.js'))) apis[f.slice(0, -3)] = (await import(`./api/${f}`)).default;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png' };
 const PORT = Number(process.env.PORT) || 3000;
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
-  if (url.pathname === '/api/config') {
+  const api = /^\/api\/([\w-]+)$/.exec(url.pathname);
+  if (api && apis[api[1]]) {
     res.status = (c) => { res.statusCode = c; return res; };
     res.json = (o) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); };
-    return config(req, res);
+    return apis[api[1]](req, res);
   }
   let p = path.normalize(url.pathname).replace(/^(\.\.[/\\])+/, '');
   if (p === '/' ) p = '/index.html';

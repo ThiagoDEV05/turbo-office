@@ -91,6 +91,27 @@ async function checkMyBan() {
   if (data && activeBan(data)) showBanned(data);
 }
 
+// ------------------------------------------------------------------ Agenda (link iCal)
+let calEvents = [];
+async function loadCalendar() {
+  const { data } = await sb.auth.getSession();
+  if (!data.session) return;
+  try {
+    const r = await fetch('/api/calendar', { headers: { Authorization: `Bearer ${data.session.access_token}` } });
+    state.calendar = await r.json();
+  } catch { state.calendar = { connected: false, error: 'Não foi possível consultar a agenda agora.', events: [] }; }
+  calEvents = (state.calendar.events || []).map((e) => [Date.parse(e.start), Date.parse(e.end)]);
+  tickMeeting();
+  emit('calendar');
+}
+// Em reunião agora? Atualiza a presença ("📅 Em reunião até 15:30") para todo mundo ver
+function tickMeeting() {
+  const now = Date.now();
+  const cur = calEvents.find(([s, e]) => s <= now && now < e);
+  const until = cur ? new Date(cur[1]).toISOString() : null;
+  if ((getMeta().meeting?.until || null) !== until) setMeta({ meeting: until ? { until } : null });
+}
+
 // Barra de membros: aparece nos canais de texto e fica escondida nas salas de voz (cada um guarda a sua preferência)
 const membersKind = () => (state.view?.type === 'voice' ? 'voice' : 'text');
 function applyMembersPref() {
@@ -280,6 +301,25 @@ const actions = {
     ui.toast({ title: `✅ ${displayName(id)} foi desbanido(a)`, timeout: 3000 });
     await loadBans(); renderAll();
   },
+  async getCalendarLink() {
+    const { data } = await sb.from('calendar_links').select('ics_url').eq('user_id', state.me).maybeSingle();
+    return data?.ics_url || '';
+  },
+  async saveCalendarLink(url) {
+    const clean = url.trim().replace(/^webcal:\/\//i, 'https://');
+    if (!/^https:\/\//.test(clean)) return 'Cole o link completo (começa com https://).';
+    const { error } = await sb.from('calendar_links').upsert({ user_id: state.me, ics_url: clean, updated_at: new Date().toISOString() });
+    if (error) return errMsg(error);
+    await loadCalendar();
+    return state.calendar?.error || null;
+  },
+  async removeCalendarLink() {
+    await sb.from('calendar_links').delete().eq('user_id', state.me);
+    state.calendar = { connected: false, events: [] };
+    calEvents = [];
+    tickMeeting();
+    emit('calendar');
+  },
   ring(id) {
     sendTo(id, 'ring', { room: state.voiceRoom });
     ui.toast({ title: `Chamando ${displayName(id)}…`, timeout: 3000 });
@@ -296,9 +336,16 @@ const actions = {
 function bindEvents() {
   on('presence', () => { checkRoomSounds(); fetchUnknownProfiles(); renderAll(); });
   on('unread', renderAll);
-  on('speaking', renderAll);
+  // Quem está falando: só acende/apaga o anel verde (redesenhar a lista toda a cada fala fazia piscar)
+  on('speaking', () => {
+    for (const el of document.querySelectorAll('#channelList [data-uid], #memberList [data-uid], .msg[data-uid]')) {
+      el.querySelector('.avatar')?.classList.toggle('speaking', state.speaking.has(el.dataset.uid));
+    }
+    const me = $('#meAvatar'); if (me) me.classList.toggle('speaking', state.speaking.has(state.me));
+  });
   on('media-local', () => ui.renderControls());
   on('connection', (ok) => { if (!ok) checkMyBan(); renderAll(); });
+  on('calendar', renderAll);
   on('open-view', selectView);
 
   on('db:rooms', () => loadRooms());
@@ -463,6 +510,9 @@ async function boot() {
   }
   setInterval(rtc.updatePeers, 500);
   setInterval(checkMyBan, 60e3);
+  loadCalendar();
+  setInterval(loadCalendar, 5 * 60e3);
+  setInterval(tickMeeting, 20e3);
 }
 
 boot();

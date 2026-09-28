@@ -171,7 +171,7 @@ export function toggleDeaf() {
   publishMedia();
 }
 
-function applyDeaf() { for (const p of peers.values()) { p.audioEl.muted = state.deafened; p.screenAudioEl.muted = state.deafened; } }
+function applyDeaf() { for (const p of peers.values()) { const m = state.deafened || localMuted.has(p.id); p.audioEl.muted = m; p.screenAudioEl.muted = m; } }
 
 export function forceMute(muted) {
   state.modMuted = muted;
@@ -248,6 +248,16 @@ export function publishMedia() {
   emit('tiles');
 }
 
+// "Silenciar para mim": só eu deixo de ouvir a pessoa (os outros continuam ouvindo)
+const localMuted = new Set((() => { try { return JSON.parse(localStorage.getItem('to.localMuted') || '[]'); } catch { return []; } })());
+export const isLocalMuted = (id) => localMuted.has(id);
+export function setLocalMute(id, muted) {
+  muted ? localMuted.add(id) : localMuted.delete(id);
+  localStorage.setItem('to.localMuted', JSON.stringify([...localMuted]));
+  applyDeaf();
+  emit('tiles');
+}
+
 export function setUserVolume(id, v) {
   userVolume.set(id, v);
   const p = peers.get(id);
@@ -264,11 +274,11 @@ function createPeer(id, initiator) {
   const pc = new RTCPeerConnection({ iceServers });
   const audioEl = new Audio();
   audioEl.autoplay = true;
-  audioEl.muted = state.deafened;
+  audioEl.muted = state.deafened || localMuted.has(id);
   audioEl.volume = getUserVolume(id);
   const screenAudioEl = new Audio();
   screenAudioEl.autoplay = true;
-  screenAudioEl.muted = state.deafened;
+  screenAudioEl.muted = state.deafened || localMuted.has(id);
   screenAudioEl.volume = getUserVolume(id);
   if (local.speakerDeviceId && canPickSpeaker) for (const el of [audioEl, screenAudioEl]) el.setSinkId(local.speakerDeviceId).catch(() => {});
   const peer = { id, pc, initiator, streams: {}, audioEl, screenAudioEl, createdAt: Date.now(), staleSince: null };
@@ -547,6 +557,7 @@ function layoutGrid() {
 }
 
 function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) {
+  el.dataset.uid = id;
   const v = el.querySelector('video');
   if (v.srcObject !== (stream || null)) v.srcObject = stream || null;
   if (stream) v.play().catch(() => {});
@@ -571,12 +582,12 @@ function renderStage() {
   const room = state.voiceRoom;
   const wanted = [];
   if (room) {
-    const icon = (p) => `${p?.media?.mic ? '' : '🔇'}${p?.deaf ? '🎧' : ''}`;
+    const icon = (p, id) => `${p?.media?.mic ? '' : '🔇'}${p?.deaf ? '🎧' : ''}${localMuted.has(id) ? '🔕' : ''}`;
     for (const id of membersIn(room)) {
       const p = state.presence.get(id);
       if (id === state.me) {
         const camKey = `cam:${id}`;
-        wanted.push([camKey, { id, name: `${displayName(id)} (você)`, icons: icon(p), mirror: true, stream: local.cam ? (sameTrack(tiles.get(camKey), local.cam) ? tiles.get(camKey).querySelector('video').srcObject : new MediaStream([local.cam])) : null }]);
+        wanted.push([camKey, { id, name: `${displayName(id)} (você)`, icons: icon(p, id), mirror: true, stream: local.cam ? (sameTrack(tiles.get(camKey), local.cam) ? tiles.get(camKey).querySelector('video').srcObject : new MediaStream([local.cam])) : null }]);
         if (local.screen) {
           const k = `screen:${id}`;
           wanted.push([k, { id, name: 'Sua tela', isScreen: true, stream: sameTrack(tiles.get(k), local.screen) ? tiles.get(k).querySelector('video').srcObject : new MediaStream([local.screen]) }]);
@@ -585,7 +596,7 @@ function renderStage() {
       }
       const peer = peers.get(id);
       const connecting = !peer || peer.pc.connectionState !== 'connected';
-      wanted.push([`cam:${id}`, { id, name: displayName(id), icons: icon(p), connecting, stream: p?.media?.cam && peer?.streams.cam ? peer.streams.cam : null }]);
+      wanted.push([`cam:${id}`, { id, name: displayName(id), icons: icon(p, id), connecting, stream: p?.media?.cam && peer?.streams.cam ? peer.streams.cam : null }]);
       if (p?.media?.screen && peer?.streams.screen) wanted.push([`screen:${id}`, { id, name: `Tela de ${displayName(id)}`, isScreen: true, stream: peer.streams.screen }]);
     }
   }

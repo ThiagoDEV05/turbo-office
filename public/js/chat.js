@@ -100,7 +100,7 @@ export function renderMessages(forceBottom = false) {
   for (const m of c.messages) {
     const cont = prev && prev.from === m.from && m.ts - prev.ts < 5 * 60e3;
     const canDelete = m.from === state.me || (myRank() >= 2 && key.startsWith('room:'));
-    box.append(h('div', { class: `msg${cont ? ' cont' : ''}` },
+    box.append(h('div', { class: `msg${cont ? ' cont' : ''}`, 'data-uid': m.from },
       avatar(m.from),
       h('div', { style: 'min-width:0' },
         cont ? null : h('div', { class: 'head' }, h('span', { style: nameColor(state.profiles.get(m.from)) ? `color:${nameColor(state.profiles.get(m.from))}` : '' }, displayName(m.from)), h('time', {}, fmtTime(m.ts))),

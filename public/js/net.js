@@ -123,6 +123,7 @@ function syncPresence() {
       deaf: !!m.deaf,
       status: m.status || 'available',
       statusText: typeof m.statusText === 'string' ? m.statusText.slice(0, 60) : '',
+      meeting: m.meeting && typeof m.meeting.until === 'string' ? { until: m.meeting.until } : null,
     });
   }
   // O próprio estado local é a fonte da verdade para mim (evita "piscar" até o eco chegar)

@@ -7,5 +7,10 @@
   "scripts": {
     "dev": "node dev-server.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "node-ical": "^0.20.1"
+  }
 }

@@ -14,6 +14,7 @@ export const state = {
   deafened: false,
   modMuted: false,        // mutado por Gestor/Admin
   connected: false,
+  calendar: null,         // { connected, error?, events: [{start,end}] } — só horários
 };
 
 export const bus = new EventTarget();
@@ -33,6 +34,15 @@ export const canManageRooms = () => myRank() >= 2;
 export const canModerate = (id) => id !== state.me && myRank() >= 2 && myRank() > rank(state.profiles.get(id)?.role);
 
 export const STATUS_LABEL = { available: 'Disponível', busy: 'Ocupado', away: 'Ausente' };
+const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+// Texto de status: o que a pessoa escreveu > "Em reunião até…" (agenda) > Disponível/Ocupado/Ausente
+export function statusLine(pr) {
+  if (!pr) return 'Offline';
+  if (pr.statusText) return pr.statusText;
+  if (pr.meeting?.until && Date.parse(pr.meeting.until) > Date.now()) return `📅 Em reunião até ${hhmm(pr.meeting.until)}`;
+  return STATUS_LABEL[pr.status] || 'Disponível';
+}
+
 export const COLORS = ['#22d3ee', '#0ea5e9', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f97316', '#f59e0b', '#10b981', '#14b8a6', '#64748b'];
 
 export const dmKey = (a, b) => (a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`);

@@ -331,6 +331,18 @@ drop policy if exists bans_delete on public.bans;
 create policy bans_delete on public.bans for delete to authenticated
   using (my_rank() >= 2 and my_rank() > rank_of(user_id));
 
+-- ---------------------------------------------------------------- Agenda (link iCal privado)
+-- Só a própria pessoa lê/grava o link. Os outros só veem "Em reunião até HH:MM" (pela presença).
+create table if not exists public.calendar_links (
+  user_id uuid primary key default auth.uid() references public.profiles(id) on delete cascade,
+  ics_url text not null check (char_length(ics_url) <= 1000 and ics_url ~ '^(https|webcal)://'),
+  updated_at timestamptz not null default now()
+);
+alter table public.calendar_links enable row level security;
+drop policy if exists calendar_own on public.calendar_links;
+create policy calendar_own on public.calendar_links for all to authenticated
+  using (user_id = auth.uid() and my_rank() >= 1) with check (user_id = auth.uid() and my_rank() >= 1);
+
 -- ---------------------------------------------------------------- Permissões das tabelas
 -- Explícitas para funcionar mesmo com "Automatically expose new tables" desligado.
 -- Quem pode o quê, linha a linha, é decidido pelas políticas RLS acima.
@@ -340,7 +352,8 @@ grant select, insert, update, delete on public.categories, public.rooms to authe
 grant select, insert, delete on public.messages to authenticated;
 grant select, insert on public.mod_actions to authenticated;
 grant select, insert, update, delete on public.bans to authenticated;
-revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions, public.bans from anon;
+grant select, insert, update, delete on public.calendar_links to authenticated;
+revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions, public.bans, public.calendar_links from anon;
 
 -- ---------------------------------------------------------------- Fotos de perfil (Storage)
 -- Bucket público "avatars"; cada pessoa só envia/apaga arquivos na pasta com o próprio id.

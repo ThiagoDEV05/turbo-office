@@ -1,11 +1,12 @@
 // Renderização da interface: canais, membros, cabeçalho, popovers, modais e notificações.
 import {
   state, on, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
-  displayName, colorOf, initials, membersIn, dmOther, photoOf,
+  displayName, colorOf, initials, membersIn, dmOther, photoOf, statusLine,
 } from './state.js';
 import {
   local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
   getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality, SCREEN_PRESETS,
+  isLocalMuted, setLocalMute,
 } from './rtc.js';
 import { THEMES, GRADIENTS, ACCENTS, getPrefs, applyPrefs } from './prefs.js';
 
@@ -83,7 +84,7 @@ export function profileCard(p, pr) {
   return h('div', { class: 'pcard' },
     h('div', { class: 'pc-banner', style: bannerStyle(p) }),
     h('div', { class: 'pc-head' }, avatarOf(p, 'xl', pr ? pr.status : 'offline'),
-      pr?.statusText ? h('div', { class: 'pc-bubble' }, pr.statusText) : null),
+      pr && statusLine(pr) !== STATUS_LABEL[pr.status] ? h('div', { class: 'pc-bubble' }, statusLine(pr)) : null),
     h('div', { class: 'pc-body' },
       h('div', { class: 'pc-name', style: nameColor(p) ? `color:${nameColor(p)}` : '' }, p?.name || ''),
       h('div', { class: 'pc-sub' }, [handle, p?.pronouns].filter(Boolean).join(' • ')),
@@ -130,7 +131,7 @@ function roomEntry(r, unreadOf) {
     for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
       const p = state.presence.get(id);
       const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
-      list.append(h('div', { class: 'vm', onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
+      list.append(h('div', { class: 'vm', 'data-uid': id, onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
     }
     out.push(list);
   }
@@ -172,7 +173,7 @@ export function renderChannels(unreadOf) {
       const other = dmOther(key);
       if (!state.profiles.has(other)) continue;
       const unread = unreadOf(key);
-      nav.append(h('button', { class: `chan${isActive('dm', other) ? ' active' : ''}${unread ? ' unread' : ''}`, onclick: () => A.selectView({ type: 'dm', id: other }) },
+      nav.append(h('button', { class: `chan${isActive('dm', other) ? ' active' : ''}${unread ? ' unread' : ''}`, 'data-uid': other, onclick: () => A.selectView({ type: 'dm', id: other }) },
         avatar(other, 'xs', true), h('span', { class: 'nm' }, displayName(other)),
         unread ? h('span', { class: 'badge' }, String(unread)) : null));
     }
@@ -206,9 +207,10 @@ function memberRow(p, isOnline) {
   let sub = '';
   if (isOnline) {
     const room = pr.room && state.rooms.get(pr.room);
-    sub = pr.statusText || (room ? `🔊 ${room.name}` : pr.room ? '🔊 Em uma sala' : STATUS_LABEL[pr.status]);
+    const line = statusLine(pr);
+    sub = line !== STATUS_LABEL[pr.status] ? line : room ? `🔊 ${room.name}` : pr.room ? '🔊 Em uma sala' : line;
   }
-  return h('div', { class: `member${isOnline ? '' : ' offline'}`, onclick: (e) => openMemberPopover(p.id, e.currentTarget) },
+  return h('div', { class: `member${isOnline ? '' : ' offline'}`, 'data-uid': p.id, onclick: (e) => openMemberPopover(p.id, e.currentTarget) },
     avatar(p.id, 'sm', true),
     h('div', { class: 'info' }, h('div', { class: 'name', style: nameColor(p) ? `color:${nameColor(p)}` : '' }, p.name), sub ? h('div', { class: 'sub' }, sub) : null));
 }
@@ -229,7 +231,7 @@ export function renderHeader() {
   } else if (v?.type === 'dm') {
     icon = '@'; title = displayName(v.id);
     const pr = state.presence.get(v.id);
-    sub = pr ? (pr.statusText || STATUS_LABEL[pr.status]) : 'Offline';
+    sub = statusLine(pr);
   }
   $('#mainIcon').textContent = icon;
   $('#mainTitle').textContent = title;
@@ -243,7 +245,8 @@ export function renderUserPanel() {
   const av = $('#meAvatar');
   av.replaceWith(Object.assign(avatar(state.me, 'sm', true), { id: 'meAvatar' }));
   $('#meName').textContent = p.name;
-  $('#meStatus').textContent = pr?.statusText || `${STATUS_LABEL[pr?.status || 'available']} · ${ROLES[p.role].label}`;
+  const line = statusLine(pr);
+  $('#meStatus').textContent = pr && line !== STATUS_LABEL[pr.status] ? line : `${STATUS_LABEL[pr?.status || 'available']} · ${ROLES[p.role].label}`;
 }
 
 export function renderControls() {
@@ -293,7 +296,7 @@ export function renderVoiceView() {
     people.innerHTML = '';
     const inside = membersIn(v.id);
     if (!inside.length) people.append('Ninguém na sala ainda.');
-    for (const id of inside) people.append(h('span', { class: 'lobby-chip' }, avatar(id, 'xs'), displayName(id)));
+    for (const id of inside) people.append(h('span', { class: 'lobby-chip', 'data-uid': id }, avatar(id, 'xs'), displayName(id)));
   }
 }
 
@@ -611,12 +614,13 @@ function showSetTab(tab) {
   stopMeter();
   testStream?.getTracks().forEach((t) => t.stop()); testStream = null;
   $('#settingsModal').querySelectorAll('.set-nav .srv-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  $('#setHeading').textContent = { profile: 'Meu perfil', appearance: 'Aparência', voice: 'Voz e vídeo' }[tab];
+  $('#setHeading').textContent = { profile: 'Meu perfil', appearance: 'Aparência', voice: 'Voz e vídeo', calendar: 'Agenda' }[tab];
   $('#setError').textContent = '';
   const box = $('#setContent');
   box.innerHTML = '';
   if (tab === 'profile') renderProfileTab(box);
   else if (tab === 'appearance') renderAppearanceTab(box);
+  else if (tab === 'calendar') renderCalendarTab(box);
   else renderVoiceTab(box);
 }
 
@@ -739,6 +743,54 @@ function renderAppearanceTab(box) {
   render();
 }
 
+// ---------------------------------------------------------------- Aba: Agenda
+async function renderCalendarTab(box) {
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dayLabel = (iso) => { const d = new Date(iso); const t = new Date(); return d.toDateString() === t.toDateString() ? 'Hoje' : d.toDateString() === new Date(+t + 86400e3).toDateString() ? 'Amanhã' : d.toLocaleDateString('pt-BR'); };
+  const input = h('input', { class: 'input', type: 'url', placeholder: 'https://calendar.google.com/calendar/ical/…/private-…/basic.ics', autocomplete: 'off' });
+  input.addEventListener('keydown', (e) => e.stopPropagation());
+  input.value = await A.getCalendarLink();
+  const statusBox = h('div', { class: 'set-sec' });
+  const paint = () => {
+    statusBox.innerHTML = '';
+    const c = state.calendar;
+    if (!input.value) { statusBox.append(h('div', { class: 'muted small' }, 'Nenhuma agenda conectada.')); return; }
+    if (c?.error) { statusBox.append(h('div', { class: 'error' }, c.error)); return; }
+    const upcoming = (c?.events || []).filter((e) => Date.parse(e.end) > Date.now());
+    statusBox.append(h('div', { style: 'color:var(--ok);font-weight:700' }, '✅ Agenda conectada'),
+      h('div', { class: 'muted small', style: 'margin:4px 0 10px' }, 'Seu status muda sozinho para "📅 Em reunião até…" durante as reuniões. Atualiza a cada 5 minutos.'));
+    if (!upcoming.length) statusBox.append(h('div', { class: 'muted small' }, 'Nenhuma reunião nas próximas horas.'));
+    for (const e of upcoming.slice(0, 8)) {
+      const now = Date.parse(e.start) <= Date.now();
+      statusBox.append(h('div', { class: 'switch-row' }, h('div', {}, h('div', { class: 't' }, `${dayLabel(e.start)} · ${hhmm(e.start)} – ${hhmm(e.end)}`), now ? h('div', { class: 'd', style: 'color:var(--warn)' }, 'Acontecendo agora') : null)));
+    }
+  };
+  const saveBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+    $('#setError').textContent = '';
+    saveBtn.disabled = true; saveBtn.textContent = 'Conectando…';
+    const err = await A.saveCalendarLink(input.value);
+    saveBtn.disabled = false; saveBtn.textContent = 'Salvar e conectar';
+    if (err) $('#setError').textContent = err;
+    paint();
+  } }, 'Salvar e conectar');
+  const removeBtn = h('button', { class: 'btn danger-outline', type: 'button', onclick: async () => { await A.removeCalendarLink(); input.value = ''; paint(); } }, 'Desconectar');
+  box.append(
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Conecte sua agenda para o time saber quando você está em reunião. Ninguém vê o título nem os detalhes das reuniões: só aparece "📅 Em reunião até 15:30".'),
+    h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Como pegar o link no Google Agenda'),
+      h('ol', { class: 'muted', style: 'margin:0;padding-left:20px;line-height:1.7;font-size:14px' },
+        h('li', {}, 'Abra calendar.google.com no computador.'),
+        h('li', {}, 'Clique na engrenagem ⚙️ → Configurações.'),
+        h('li', {}, 'Na esquerda, em "Configurações das minhas agendas", clique na sua agenda (seu nome).'),
+        h('li', {}, 'Desça até "Integrar agenda" e copie o "Endereço secreto no formato iCal".'),
+        h('li', {}, 'Cole aqui embaixo e clique em Salvar.')),
+      h('div', { class: 'muted small', style: 'margin-top:8px' }, 'Também funciona com o link ICS do Outlook ou do iCloud. O link fica guardado só para você.')),
+    h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Link secreto da agenda (iCal)'), input,
+      h('div', { class: 'row-gap', style: 'margin-top:10px' }, saveBtn, removeBtn)),
+    statusBox);
+  on('calendar', () => { if (setTab === 'calendar') paint(); });
+  paint();
+}
+
 // ---------------------------------------------------------------- Aba: Voz e vídeo
 function stopMeter() {
   clearInterval(meterTimer); meterTimer = null;
@@ -826,6 +878,119 @@ async function renderVoiceTab(box) {
   await fill();
   startMeter();
 }
+
+// ------------------------------------------------------------------ Menu do botão direito (como no Discord)
+const ctx = () => $('#ctxmenu');
+export function closeContextMenu() { const m = ctx(); if (m) m.hidden = true; }
+const pointAnchor = (x, y) => ({ getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y, width: 0, height: 0, x, y }) });
+
+function ctxItem(label, onclick, { danger = false, disabled = false, checked = null } = {}) {
+  const b = h('button', { class: `ctx-item${danger ? ' danger' : ''}`, type: 'button', disabled },
+    h('span', { class: 'ctx-label' }, label),
+    checked === null ? null : h('span', { class: `ctx-check${checked ? ' on' : ''}` }, checked ? '✓' : ''));
+  b.addEventListener('click', (e) => { e.stopPropagation(); if (disabled) return; closeContextMenu(); onclick(); });
+  return b;
+}
+function ctxSub(label, build) {
+  const sub = h('div', { class: 'ctx-sub' });
+  build(sub);
+  const item = h('div', { class: 'ctx-item has-sub', tabindex: 0 }, h('span', { class: 'ctx-label' }, label), h('span', { class: 'ctx-arrow' }, '›'), sub);
+  item.addEventListener('mouseenter', () => {
+    // abre para o lado que couber e sobe se estiver perto do fim da tela
+    sub.classList.remove('left');
+    sub.style.top = '-6px';
+    sub.style.maxHeight = `${innerHeight - 16}px`;
+    const r = item.getBoundingClientRect();
+    if (r.right + 240 > innerWidth) sub.classList.add('left');
+    requestAnimationFrame(() => {
+      const sr = sub.getBoundingClientRect();
+      const overflow = sr.bottom - (innerHeight - 8);
+      if (overflow > 0) sub.style.top = `${-6 - Math.min(overflow, sr.top - 8)}px`;
+    });
+  });
+  return item;
+}
+const ctxSep = () => h('div', { class: 'ctx-sep' });
+const ctxLabel = (t) => h('div', { class: 'ctx-title' }, t);
+
+export function openUserMenu(id, x, y) {
+  const p = state.profiles.get(id);
+  if (!p) return;
+  closePopover();
+  const m = ctx();
+  m.innerHTML = '';
+  const pr = state.presence.get(id);
+  const isMe = id === state.me;
+  const room = pr?.room && state.rooms.get(pr.room);
+  const sameRoom = state.voiceRoom && pr?.room === state.voiceRoom;
+
+  m.append(h('div', { class: 'ctx-head' }, avatar(id, 'xs'), h('span', {}, p.name)));
+  m.append(ctxItem('👤 Perfil', () => openMemberPopover(id, pointAnchor(x, y))));
+  if (isMe) {
+    m.append(ctxItem('✏️ Editar perfil', () => openSettings('profile')));
+  } else {
+    m.append(ctxItem('💬 Mensagem', () => A.selectView({ type: 'dm', id })));
+    if (pr && state.voiceRoom && pr.room !== state.voiceRoom) m.append(ctxItem('🔔 Chamar para minha sala', () => A.ring(id)));
+    if (room && pr.room !== state.voiceRoom) m.append(ctxItem(`🔊 Entrar em ${room.name}`, () => A.joinVoice(pr.room)));
+    if (sameRoom) {
+      m.append(ctxSep(), ctxLabel('Volume do usuário'));
+      const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: getUserVolume(id) });
+      const pct = h('span', { class: 'muted small' }, `${Math.round(getUserVolume(id) * 100)}%`);
+      range.oninput = () => { setUserVolume(id, Number(range.value)); pct.textContent = `${Math.round(range.value * 100)}%`; };
+      range.addEventListener('click', (e) => e.stopPropagation());
+      m.append(h('div', { class: 'ctx-range' }, range, pct));
+    }
+    m.append(ctxItem('🔕 Silenciar para mim', () => setLocalMute(id, !isLocalMuted(id)), { checked: isLocalMuted(id) }));
+  }
+
+  if (canModerate(id)) {
+    m.append(ctxSep(), ctxLabel('Moderação'));
+    if (pr?.room) {
+      m.append(ctxItem('🔇 Silenciar no servidor', () => A.moderate(id, 'mute')));
+      m.append(ctxItem('🎙️ Remover silêncio', () => A.moderate(id, 'unmute')));
+    }
+    if (pr) {
+      m.append(ctxSub('↪️ Mover para', (sub) => {
+        const cats = [...state.categories.values()].sort((a, b) => a.position - b.position);
+        const voice = [...state.rooms.values()].filter((r) => r.kind === 'voice');
+        const groups = [...cats.map((c) => [c.name, voice.filter((r) => r.category_id === c.id)]), ['Sem categoria', voice.filter((r) => !r.category_id || !state.categories.has(r.category_id))]];
+        for (const [name, rooms] of groups) {
+          if (!rooms.length) continue;
+          sub.append(ctxLabel(name));
+          for (const r of rooms.sort((a, b) => a.position - b.position)) sub.append(ctxItem(r.name, () => A.moveTo(id, r.id), { disabled: r.id === pr.room }));
+        }
+      }));
+    }
+    if (pr?.room) m.append(ctxItem('⏏ Desconectar da sala', () => A.moderate(id, 'kick'), { danger: true }));
+    const ban = state.bans.get(id);
+    if (ban) m.append(ctxItem(`✅ Desbanir (${banLabel(ban)})`, () => A.unban(id)));
+    else m.append(ctxItem(`⛔ Banir ${p.name.split(' ')[0]}…`, () => openBanMenu(id, pointAnchor(x, y)), { danger: true }));
+  }
+  if (myRank() === 3 && !isMe) {
+    m.append(ctxSub('🛡️ Cargo', (sub) => {
+      for (const r of ['admin', 'gestor', 'membro']) sub.append(ctxItem(ROLES[r].label, () => A.setRole(id, r), { checked: p.role === r }));
+    }));
+  }
+  m.append(ctxSep(), ctxItem('📋 Copiar e-mail', () => { navigator.clipboard?.writeText(p.email); toast({ title: 'E-mail copiado', body: p.email, timeout: 2000 }); }));
+
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(8, Math.min(innerWidth - r.width - 8, x))}px`;
+  m.style.top = `${Math.max(8, Math.min(innerHeight - r.height - 8, y))}px`;
+}
+
+// Botão direito em qualquer lugar onde a pessoa aparece (lista de membros, sala de voz, palco, chat…)
+document.addEventListener('contextmenu', (e) => {
+  const el = e.target.closest?.('[data-uid]') || document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-uid]');
+  const id = el?.dataset.uid;
+  if (!id || !state.profiles.has(id)) { closeContextMenu(); return; }
+  e.preventDefault();
+  openUserMenu(id, e.clientX, e.clientY);
+});
+document.addEventListener('pointerdown', (e) => { const m = ctx(); if (m && !m.hidden && !m.contains(e.target)) closeContextMenu(); });
+addEventListener('blur', closeContextMenu);
+addEventListener('resize', closeContextMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
 
 // ------------------------------------------------------------------ Mover / banir
 export const fmtDate = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -915,7 +1080,7 @@ export function renderServerSettings() {
         ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
       sel.onchange = async () => { const err = await A.setRole(p.id, sel.value); if (err) sel.value = p.role; };
       const more = h('button', { class: 'icon-btn', title: 'Ações', onclick: (e) => openMemberPopover(p.id, e.currentTarget) }, '⋯');
-      list.append(h('div', { class: 'admin-row' }, avatar(p.id, 'sm', true),
+      list.append(h('div', { class: 'admin-row', 'data-uid': p.id }, avatar(p.id, 'sm', true),
         h('div', { style: 'min-width:0' },
           h('div', { class: 'nm' }, p.name + (p.id === state.me ? ' (você)' : ''), ban ? h('span', { class: 'ban-tag' }, `  ⛔ banido ${banLabel(ban)}`) : null),
           h('div', { class: 'em' }, `${p.email}${pr ? ` · ${room ? `🔊 ${room.name}` : 'online'}` : ''}`)),
