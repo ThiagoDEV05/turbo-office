@@ -211,13 +211,6 @@ input, select { font: inherit; color: inherit; }
 .lobby-card h2 { margin: 0; }
 #lobbyPeople { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .lobby-chip { display: flex; align-items: center; gap: 6px; background: var(--panel-2); padding: 4px 10px 4px 4px; border-radius: 999px; }
-#stage {
-  flex: 1; min-height: 0; padding: 16px; display: grid; gap: 12px; align-content: center;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); overflow-y: auto;
-}
-#stage[data-count="1"] { grid-template-columns: minmax(0, 900px); justify-content: center; }
-#stage[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 640px)); justify-content: center; }
-#stage.has-screen .tile.screen { grid-column: 1 / -1; aspect-ratio: auto; height: 60vh; }
 .tile {
   position: relative; aspect-ratio: 16/9; border-radius: 14px; overflow: hidden; background: var(--tile); border: 2px solid transparent;
   transition: border-color .12s; cursor: zoom-in; min-height: 0;
@@ -236,7 +229,8 @@ input, select { font: inherit; color: inherit; }
 .tile-label .tile-name { background: rgba(0, 0, 0, .6); padding: 3px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-label .tile-icons:empty { display: none; }
 .tile-label .tile-icons { background: rgba(0, 0, 0, .6); padding: 3px 6px; border-radius: 6px; font-size: 12px; }
-.tile-state { position: absolute; top: 8px; right: 10px; font-size: 12px; color: var(--muted); }
+.tile-state { position: absolute; bottom: 10px; right: 10px; font-size: 12px; color: #cbd5e1; background: rgba(0,0,0,.5); padding: 2px 8px; border-radius: 6px; }
+.tile-state:empty { display: none; }
 #callBar { display: flex; justify-content: center; gap: 12px; padding: 14px; flex: none; }
 
 #spotlight { position: fixed; inset: 0; z-index: 50; background: rgba(3, 7, 18, .94); display: grid; place-items: center; padding: 24px; }
@@ -333,7 +327,6 @@ input, select { font: inherit; color: inherit; }
   .layout.nav-open #left { transform: none; }
   #navToggle { display: inline-block; }
   .modal-card.settings { grid-template-columns: 1fr; }
-  #stage { grid-template-columns: 1fr !important; }
   .ctl { width: 44px; height: 44px; }
 }
 
@@ -415,3 +408,31 @@ textarea.input { resize: vertical; min-height: 80px; font: inherit; }
 .fps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 @media (max-width: 900px) { .set-grid { grid-template-columns: 1fr; } .set-preview-card { position: static; } }
 @media (max-width: 720px) { .modal-card.usettings { grid-template-columns: 1fr; height: auto; } .set-nav { flex-direction: row; overflow-x: auto; } }
+
+/* ------------------------------------------------ Palco da chamada (estilo Discord) */
+#stage { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 12px 4px; }
+.stage-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-content: center; }
+.stage-grid .tile { width: var(--tile-w, 320px); flex: none; }
+.stage-focus { flex: 1; min-height: 0; display: flex; }
+.stage-focus .tile { flex: 1; aspect-ratio: auto; height: 100%; cursor: default; background: #000; }
+.stage-focus .tile video { object-fit: contain; }
+.stage-focus .tile .placeholder span { width: 120px; height: 120px; font-size: 40px; }
+.strip-toggle { align-self: center; flex: none; background: none; border: 0; color: var(--muted); font-size: 12px; font-weight: 700; padding: 2px 12px; border-radius: 6px; }
+.strip-toggle:hover { color: var(--text); background: var(--hover); }
+.stage-strip { flex: none; display: flex; gap: 10px; overflow-x: auto; justify-content: safe center; padding-bottom: 4px; scrollbar-width: thin; }
+.stage-strip .tile { flex: none; width: 200px; height: 112px; aspect-ratio: auto; cursor: pointer; }
+.stage-strip .tile:hover { border-color: var(--accent); }
+.stage-strip .tile .placeholder span { width: 46px; height: 46px; font-size: 16px; }
+.stage-strip .tile .tile-label { font-size: 11px; left: 6px; bottom: 6px; }
+.stage-strip .tile .tile-state { font-size: 10px; bottom: 6px; right: 6px; }
+.stage-grid .tile.screen { cursor: pointer; }
+.tile .live-badge { display: none; position: absolute; top: 8px; left: 8px; background: #ef4444; color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .05em; padding: 2px 6px; border-radius: 4px; }
+.tile.screen .live-badge { display: block; }
+.tile-actions { position: absolute; top: 10px; right: 10px; display: none; gap: 6px; z-index: 2; }
+.tile.focused:hover .tile-actions, .tile.focused:fullscreen .tile-actions { display: flex; }
+.tile-btn { width: 36px; height: 36px; border-radius: 9px; border: 0; background: rgba(0, 0, 0, .6); color: #fff; font-size: 17px; line-height: 1; display: grid; place-items: center; }
+.tile-btn:hover { background: rgba(0, 0, 0, .85); }
+.tile:fullscreen { border: 0; border-radius: 0; background: #000; }
+.tile:fullscreen video { object-fit: contain; }
+body.theater #left, body.theater #right, body.theater #mainHead { display: none !important; }
+body.theater .layout, body.theater .layout.no-members { grid-template-columns: 1fr !important; }

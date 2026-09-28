@@ -138,6 +138,7 @@ async function joinVoice(roomId) {
 
 function leaveVoice(silent = false) {
   if (!state.voiceRoom) return;
+  rtc.toggleTheater(false);
   rtc.closeAll();
   rtc.stopAllMedia();
   state.voiceRoom = null;
@@ -387,7 +388,7 @@ function bindEvents() {
   };
 
   addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { ui.closeSpotlight(); ui.closePopover(); return; }
+    if (e.key === 'Escape') { ui.closeSpotlight(); ui.closePopover(); if (!document.fullscreenElement) rtc.toggleTheater(false); return; }
     if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
     if (e.code === 'KeyA') { e.preventDefault(); toggleMic(); }
     else if (e.code === 'KeyD') { e.preventDefault(); toggleDeaf(); }
@@ -445,7 +446,7 @@ async function boot() {
   await chat.initChat(sb);
   rtc.setIceServers(state.cfg.iceServers || []);
   ui.setActions(actions);
-  rtc.initStage($('#stage'), ui.openSpotlight);
+  rtc.initStage($('#stage'));
   bindEvents();
   await startNet(sb);
 

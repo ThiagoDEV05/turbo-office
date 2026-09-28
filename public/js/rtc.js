@@ -463,28 +463,87 @@ setInterval(() => {
 
 // ------------------------------------------------------------------ Palco (grade de vídeos)
 const tiles = new Map(); // chave -> elemento
-let stage, onSpotlight;
+let stage, gridEl, focusEl, stripEl, stripBar;
 
-export function initStage(el, spotlightFn) {
+// Destaque (como no Discord): uma transmissão/câmera grande e as demais numa faixa embaixo
+let focusKey = null;       // tile em destaque
+let userChoseFocus = false; // a pessoa escolheu/fechou o destaque manualmente
+const seenScreens = new Set();
+let stripHidden = localStorage.getItem('to.stripHidden') === '1';
+
+export function initStage(el) {
   stage = el;
-  onSpotlight = spotlightFn;
+  stage.innerHTML = '';
+  focusEl = document.createElement('div'); focusEl.className = 'stage-focus';
+  stripBar = document.createElement('button'); stripBar.className = 'strip-toggle'; stripBar.type = 'button';
+  stripBar.onclick = () => { stripHidden = !stripHidden; localStorage.setItem('to.stripHidden', stripHidden ? '1' : '0'); renderStage(); };
+  stripEl = document.createElement('div'); stripEl.className = 'stage-strip';
+  gridEl = document.createElement('div'); gridEl.className = 'stage-grid';
+  stage.append(focusEl, stripBar, stripEl, gridEl);
+  new ResizeObserver(() => layoutGrid()).observe(stage);
   on('tiles', renderStage);
   on('presence', renderStage);
   on('speaking', () => {
     for (const [key, t] of tiles) t.classList.toggle('speaking', key.startsWith('cam:') && state.speaking.has(key.slice(4)));
   });
+  document.addEventListener('fullscreenchange', renderStage);
+}
+
+export function setFocus(key) {
+  focusKey = key;
+  userChoseFocus = true;
+  renderStage();
+}
+
+// Modo cinema: esconde as barras laterais e o cabeçalho, sem ir para tela cheia
+export function toggleTheater(force) {
+  const on_ = force ?? !document.body.classList.contains('theater');
+  document.body.classList.toggle('theater', on_);
+  renderStage();
+}
+
+function tileButton(label, title, onclick) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tile-btn'; b.title = title; b.textContent = label;
+  b.addEventListener('click', (e) => { e.stopPropagation(); onclick(); });
+  return b;
 }
 
 function makeTile(key) {
   const el = document.createElement('div');
   el.className = 'tile';
-  el.innerHTML = '<video autoplay playsinline muted></video><div class="placeholder"><span></span></div><div class="tile-label"><span class="tile-icons"></span><span class="tile-name"></span></div><div class="tile-state"></div>';
-  el.addEventListener('click', () => {
-    const v = el.querySelector('video');
-    if (v.srcObject && !el.classList.contains('novideo')) onSpotlight?.(v.srcObject, el.querySelector('.tile-name').textContent);
-  });
+  el.dataset.key = key;
+  el.innerHTML = '<video autoplay playsinline muted></video><div class="placeholder"><span></span></div><div class="tile-label"><span class="tile-icons"></span><span class="tile-name"></span></div><div class="tile-state"></div><div class="live-badge">AO VIVO</div><div class="tile-actions"></div>';
+  const actions = el.querySelector('.tile-actions');
+  actions.append(
+    tileButton('⤢', 'Modo cinema (esconde as barras)', () => { if (focusKey !== key) setFocus(key); toggleTheater(); }),
+    tileButton('⛶', 'Tela cheia', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else el.requestFullscreen?.().catch(() => {});
+    }),
+    tileButton('✕', 'Sair do destaque', () => { focusKey = null; userChoseFocus = true; toggleTheater(false); if (document.fullscreenElement) document.exitFullscreen(); renderStage(); }),
+  );
+  // Clique no quadradinho: coloca em destaque
+  el.addEventListener('click', () => { if (focusKey !== key) setFocus(key); });
+  el.addEventListener('dblclick', () => { if (el.classList.contains('focused')) el.requestFullscreen?.().catch(() => {}); });
   tiles.set(key, el);
   return el;
+}
+
+// Grade que cabe inteira no espaço (sem rolar), mantendo 16:9 — como numa call do Discord
+function layoutGrid() {
+  if (!gridEl || gridEl.hidden) return;
+  const n = gridEl.children.length;
+  if (!n) return;
+  const W = gridEl.clientWidth - 8, H = gridEl.clientHeight - 8, gap = 12;
+  let best = { cols: 1, w: 0 };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const w = Math.min((W - gap * (cols - 1)) / cols, ((H - gap * (rows - 1)) / rows) * (16 / 9));
+    if (w > best.w) best = { cols, w };
+  }
+  const w = Math.max(160, Math.floor(best.w));
+  gridEl.style.setProperty('--tile-w', `${w}px`);
 }
 
 function setTile(el, { stream, id, name, icons, isScreen, mirror, connecting }) {
@@ -534,11 +593,51 @@ function renderStage() {
   wanted.sort((a, b) => (b[0].startsWith('screen:') ? 1 : 0) - (a[0].startsWith('screen:') ? 1 : 0));
   const keys = new Set(wanted.map(([k]) => k));
   for (const [k, el] of tiles) if (!keys.has(k)) { el.querySelector('video').srcObject = null; el.remove(); tiles.delete(k); }
+
+  // Nova transmissão de outra pessoa → vai para o destaque (se ninguém escolheu outra coisa)
+  for (const [k] of wanted) {
+    if (!k.startsWith('screen:') || seenScreens.has(k)) continue;
+    seenScreens.add(k);
+    if (!k.endsWith(`:${state.me}`) && (!userChoseFocus || !focusKey)) { focusKey = k; userChoseFocus = false; }
+  }
+  for (const k of [...seenScreens]) if (!keys.has(k)) seenScreens.delete(k);
+  if (focusKey && !keys.has(focusKey)) {
+    // o destaque sumiu: passa para outra transmissão, se houver
+    focusKey = wanted.find(([k]) => k.startsWith('screen:') && !k.endsWith(`:${state.me}`))?.[0] || null;
+    userChoseFocus = false;
+  }
+  if (!focusKey && document.body.classList.contains('theater')) document.body.classList.remove('theater');
+
+  const focusMode = !!focusKey;
+  stage.classList.toggle('focus-mode', focusMode);
+  stage.classList.toggle('strip-hidden', focusMode && stripHidden);
+  focusEl.hidden = !focusMode;
+  stripBar.hidden = !focusMode || wanted.length < 2;
+  stripEl.hidden = !focusMode || stripHidden || wanted.length < 2;
+  gridEl.hidden = focusMode;
+  stripBar.textContent = stripHidden ? `⌃ Mostrar participantes (${wanted.length - 1})` : '⌄ Ocultar participantes';
+
   for (const [k, opts] of wanted) {
     const el = tiles.get(k) || makeTile(k);
     setTile(el, opts);
-    stage.appendChild(el);
+    el.classList.toggle('focused', k === focusKey);
+    const parent = !focusMode ? gridEl : k === focusKey ? focusEl : stripEl;
+    // só move o elemento se mudou de lugar/ordem (evita o vídeo piscar)
+    if (el.parentElement !== parent) parent.appendChild(el);
   }
-  stage.dataset.count = String(Math.min(wanted.length, 9));
-  stage.classList.toggle('has-screen', wanted.some(([k]) => k.startsWith('screen:')));
+  // mantém a ordem dentro de cada área
+  for (const parent of [gridEl, stripEl]) {
+    const order = wanted.map(([k]) => tiles.get(k)).filter((el) => el.parentElement === parent);
+    order.forEach((el, i) => { if (parent.children[i] !== el) parent.insertBefore(el, parent.children[i] || null); });
+  }
+  const theater = document.body.classList.contains('theater');
+  const fs = !!document.fullscreenElement;
+  for (const [k, el] of tiles) {
+    const [cinema, full, close] = el.querySelectorAll('.tile-btn');
+    cinema.textContent = theater && k === focusKey ? '⤡' : '⤢';
+    cinema.title = theater && k === focusKey ? 'Sair do modo cinema' : 'Modo cinema (esconde as barras)';
+    full.title = fs ? 'Sair da tela cheia' : 'Tela cheia';
+    close.hidden = k !== focusKey;
+  }
+  layoutGrid();
 }
