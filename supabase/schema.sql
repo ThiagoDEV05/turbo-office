@@ -255,12 +255,14 @@ create table if not exists public.messages (
   created_at timestamptz not null default now()
 );
 create index if not exists messages_channel_idx on public.messages (channel, id desc);
+-- Respostas do bot de música (enviadas pelo navegador de quem deu o comando)
+alter table public.messages add column if not exists bot boolean not null default false;
 
 create or replace function public.can_read_channel(ch text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case
     when ch like 'room:%' then exists (
-      select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind = 'text' and my_rank() >= role_rank(r.min_role))
+      select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind in ('text', 'voice') and my_rank() >= role_rank(r.min_role))
     when ch like 'dm:%' then my_rank() >= 1 and auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
     else false
   end
@@ -270,7 +272,7 @@ create or replace function public.can_write_channel(ch text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case
     when ch like 'room:%' then exists (
-      select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind = 'text'
+      select 1 from rooms r where r.id::text = substring(ch from 6) and r.kind in ('text', 'voice')
         and my_rank() >= role_rank(r.min_role) and my_rank() >= role_rank(r.write_role))
     when ch like 'dm:%' then
       my_rank() >= 1 and auth.uid()::text in (split_part(ch, ':', 2), split_part(ch, ':', 3))
@@ -343,6 +345,143 @@ drop policy if exists calendar_own on public.calendar_links;
 create policy calendar_own on public.calendar_links for all to authenticated
   using (user_id = auth.uid() and my_rank() >= 1) with check (user_id = auth.uid() and my_rank() >= 1);
 
+-- ---------------------------------------------------------------- Bot de música (Turbo Music)
+-- Estado da música de cada sala de voz. Cada pessoa da sala toca no próprio navegador,
+-- sincronizada por started_at (hora do servidor, em ms). Alterações só pelas funções abaixo.
+create table if not exists public.room_music (
+  room_id uuid primary key references public.rooms(id) on delete cascade,
+  queue jsonb not null default '[]'::jsonb,
+  current jsonb,
+  repeat_mode text not null default 'off' check (repeat_mode in ('off', 'track', 'queue')),
+  volume int not null default 70 check (volume between 0 and 100),
+  updated_by uuid references public.profiles(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+alter table public.room_music enable row level security;
+drop policy if exists room_music_read on public.room_music;
+create policy room_music_read on public.room_music for select to authenticated using (
+  my_rank() >= 1 and exists (select 1 from rooms r where r.id = room_id and my_rank() >= role_rank(r.min_role))
+);
+
+create or replace function public.server_now_ms() returns bigint
+language sql stable as $$ select (extract(epoch from clock_timestamp()) * 1000)::bigint $$;
+
+-- Confere acesso à sala e trava a linha da música (cria se não existir)
+create or replace function public.music_row(p_room uuid) returns public.room_music
+language plpgsql security definer set search_path = public as $$
+declare r room_music;
+begin
+  if my_rank() < 1 or not exists (select 1 from rooms where id = p_room and kind = 'voice' and my_rank() >= role_rank(min_role)) then
+    raise exception 'Sem acesso a esta sala';
+  end if;
+  insert into room_music (room_id) values (p_room) on conflict (room_id) do nothing;
+  select * into r from room_music where room_id = p_room for update;
+  return r;
+end $$;
+
+-- Toca a próxima da fila (ou nada), a partir de agora
+create or replace function public.music_start_next(r public.room_music) returns public.room_music
+language plpgsql as $$
+declare nxt jsonb;
+begin
+  if jsonb_array_length(r.queue) > 0 then
+    nxt := r.queue -> 0;
+    r.queue := r.queue - 0;
+    r.current := nxt || jsonb_build_object('started_at', server_now_ms(), 'paused_at', null);
+  else
+    r.current := null;
+  end if;
+  return r;
+end $$;
+
+-- m!play: adiciona músicas na fila; se nada estiver tocando, começa
+create or replace function public.music_enqueue(p_room uuid, p_tracks jsonb, p_next boolean default false) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r room_music; t jsonb; items jsonb := '[]'::jsonb; pos int;
+begin
+  r := music_row(p_room);
+  if jsonb_typeof(p_tracks) <> 'array' or jsonb_array_length(p_tracks) = 0 then raise exception 'Nada para tocar'; end if;
+  for t in select * from jsonb_array_elements(p_tracks) limit 100 loop
+    if coalesce(t->>'videoId', '') !~ '^[A-Za-z0-9_-]{11}$' then continue; end if;
+    items := items || jsonb_build_array(jsonb_build_object(
+      'uid', gen_random_uuid()::text, 'videoId', t->>'videoId',
+      'title', left(coalesce(t->>'title', 'Música'), 200), 'author', left(coalesce(t->>'author', ''), 120),
+      'thumb', left(coalesce(t->>'thumb', ''), 300), 'duration', coalesce((t->>'duration')::int, 0),
+      'by', auth.uid()));
+  end loop;
+  if jsonb_array_length(items) = 0 then raise exception 'Link inválido'; end if;
+  pos := jsonb_array_length(r.queue);
+  if jsonb_array_length(r.queue) > 500 then raise exception 'Fila cheia (máx. 500)'; end if;
+  r.queue := case when p_next then items || r.queue else r.queue || items end;
+  if r.current is null then r := music_start_next(r); pos := -1; end if;
+  update room_music set queue = r.queue, current = r.current, updated_by = auth.uid(), updated_at = now() where room_id = p_room;
+  return jsonb_build_object('added', jsonb_array_length(items), 'position', pos, 'current', r.current, 'queue_size', jsonb_array_length(r.queue));
+end $$;
+
+-- m!skip / fim da música: avança só se a música atual ainda for a esperada (várias pessoas podem chamar)
+create or replace function public.music_next(p_room uuid, p_expected text, p_skip boolean default false) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r room_music;
+begin
+  r := music_row(p_room);
+  if r.current is null or r.current->>'uid' is distinct from p_expected then return jsonb_build_object('changed', false, 'current', r.current); end if;
+  if r.repeat_mode = 'track' and not p_skip then
+    r.current := r.current || jsonb_build_object('started_at', server_now_ms(), 'paused_at', null);
+  else
+    if r.repeat_mode = 'queue' then r.queue := r.queue || jsonb_build_array(r.current - 'started_at' - 'paused_at'); end if;
+    r := music_start_next(r);
+  end if;
+  update room_music set queue = r.queue, current = r.current, updated_by = auth.uid(), updated_at = now() where room_id = p_room;
+  return jsonb_build_object('changed', true, 'current', r.current);
+end $$;
+
+-- Demais comandos: pause, resume, stop, clear, shuffle, loop, volume, remove, seek
+create or replace function public.music_control(p_room uuid, p_action text, p_arg text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r room_music; pos numeric; n int; removed jsonb;
+begin
+  r := music_row(p_room);
+  if p_action = 'pause' then
+    if r.current is null or r.current->>'paused_at' is not null then return jsonb_build_object('ok', false); end if;
+    r.current := r.current || jsonb_build_object('paused_at', (server_now_ms() - (r.current->>'started_at')::bigint) / 1000.0);
+  elsif p_action = 'resume' then
+    if r.current is null or r.current->>'paused_at' is null then return jsonb_build_object('ok', false); end if;
+    pos := (r.current->>'paused_at')::numeric;
+    r.current := r.current || jsonb_build_object('started_at', server_now_ms() - (pos * 1000)::bigint, 'paused_at', null);
+  elsif p_action = 'seek' then
+    if r.current is null then return jsonb_build_object('ok', false); end if;
+    pos := greatest(0, p_arg::numeric);
+    if r.current->>'paused_at' is not null then r.current := r.current || jsonb_build_object('paused_at', pos);
+    else r.current := r.current || jsonb_build_object('started_at', server_now_ms() - (pos * 1000)::bigint); end if;
+  elsif p_action = 'stop' then
+    r.current := null; r.queue := '[]'::jsonb;
+  elsif p_action = 'clear' then
+    r.queue := '[]'::jsonb;
+  elsif p_action = 'shuffle' then
+    select coalesce(jsonb_agg(x order by random()), '[]'::jsonb) into r.queue from jsonb_array_elements(r.queue) x;
+  elsif p_action = 'loop' then
+    if p_arg not in ('off', 'track', 'queue') then raise exception 'Use: off, track ou queue'; end if;
+    r.repeat_mode := p_arg;
+  elsif p_action = 'volume' then
+    n := p_arg::int;
+    if n < 0 or n > 100 then raise exception 'Volume vai de 0 a 100'; end if;
+    r.volume := n;
+  elsif p_action = 'remove' then
+    n := p_arg::int;
+    if n < 1 or n > jsonb_array_length(r.queue) then raise exception 'Não existe a posição % na fila', n; end if;
+    removed := r.queue -> (n - 1);
+    r.queue := r.queue - (n - 1);
+  else
+    raise exception 'Comando desconhecido';
+  end if;
+  update room_music set queue = r.queue, current = r.current, repeat_mode = r.repeat_mode, volume = r.volume, updated_by = auth.uid(), updated_at = now() where room_id = p_room;
+  return jsonb_build_object('ok', true, 'current', r.current, 'queue_size', jsonb_array_length(r.queue), 'loop', r.repeat_mode, 'volume', r.volume, 'removed', removed);
+end $$;
+
+revoke all on function public.music_row(uuid) from public, anon, authenticated;
+revoke all on function public.music_start_next(public.room_music) from public, anon, authenticated;
+grant execute on function public.music_enqueue(uuid, jsonb, boolean), public.music_next(uuid, text, boolean), public.music_control(uuid, text, text), public.server_now_ms() to authenticated;
+
 -- ---------------------------------------------------------------- Permissões das tabelas
 -- Explícitas para funcionar mesmo com "Automatically expose new tables" desligado.
 -- Quem pode o quê, linha a linha, é decidido pelas políticas RLS acima.
@@ -351,6 +490,7 @@ grant select, update on public.profiles to authenticated;
 grant select, insert, update, delete on public.categories, public.rooms to authenticated;
 grant select, insert, delete on public.messages to authenticated;
 grant select, insert on public.mod_actions to authenticated;
+grant select on public.room_music to authenticated;
 grant select, insert, update, delete on public.bans to authenticated;
 grant select, insert, update, delete on public.calendar_links to authenticated;
 revoke all on public.profiles, public.categories, public.rooms, public.messages, public.mod_actions, public.bans, public.calendar_links from anon;
@@ -378,7 +518,7 @@ create policy turbo_avatars_select on storage.objects for select to authenticate
 do $$
 declare t text;
 begin
-  foreach t in array array['profiles', 'categories', 'rooms', 'messages', 'mod_actions', 'bans'] loop
+  foreach t in array array['profiles', 'categories', 'rooms', 'messages', 'mod_actions', 'bans', 'room_music'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;

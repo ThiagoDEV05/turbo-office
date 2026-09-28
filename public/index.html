@@ -67,22 +67,51 @@
       </section>
 
       <section id="voiceView" class="view" hidden>
-        <div id="voiceLobby">
-          <div class="lobby-card">
-            <div class="lobby-icon">🔊</div>
-            <h2 id="lobbyTitle"></h2>
-            <div id="lobbyPeople"></div>
-            <button class="btn primary" id="lobbyJoin">Entrar na sala</button>
+        <div class="voice-main">
+          <div id="voiceLobby">
+            <div class="lobby-card">
+              <div class="lobby-icon">🔊</div>
+              <h2 id="lobbyTitle"></h2>
+              <div id="lobbyPeople"></div>
+              <button class="btn primary" id="lobbyJoin">Entrar na sala</button>
+            </div>
+          </div>
+          <div id="stage"></div>
+          <!-- Turbo Music: tocando agora (o player do YouTube fica visível, como exigem os termos do YouTube) -->
+          <div id="musicBar" hidden>
+            <div id="musicPlayerWrap"><div id="musicPlayer"></div></div>
+            <div class="mb-info">
+              <div class="mb-title" id="mbTitle"></div>
+              <div class="mb-sub" id="mbSub"></div>
+              <div class="mb-progress"><span id="mbTime">0:00</span><div class="mb-track"><i id="mbFill"></i></div><span id="mbDur">0:00</span></div>
+            </div>
+            <div class="mb-ctl">
+              <button class="icon-btn" id="mbPause" title="Pausar / continuar">⏸</button>
+              <button class="icon-btn" id="mbSkip" title="Pular">⏭</button>
+              <button class="icon-btn" id="mbStop" title="Parar e limpar a fila">⏹</button>
+              <button class="icon-btn" id="mbLoop" title="Repetir">🔁</button>
+              <button class="icon-btn" id="mbQueue" title="Fila">📃 <span id="mbQueueN"></span></button>
+              <span class="mb-vol" title="Volume da música para você"><span>🎵</span><input type="range" id="mbVol" min="0" max="1" step="0.05"></span>
+            </div>
+          </div>
+          <div id="callBar">
+            <button class="ctl" id="cMic" title="Microfone (Ctrl+Shift+A)"></button>
+            <button class="ctl" id="cCam" title="Câmera (Ctrl+Shift+V)"></button>
+            <button class="ctl" id="cScreen" title="Compartilhar tela"></button>
+            <button class="ctl" id="cDeaf" title="Desativar áudio (Ctrl+Shift+D)"></button>
+            <button class="ctl" id="cChat" title="Chat da sala (m!play para tocar música)">💬<span class="badge" id="cChatBadge" hidden></span></button>
+            <button class="ctl danger" id="cLeave" title="Sair da sala"></button>
           </div>
         </div>
-        <div id="stage"></div>
-        <div id="callBar">
-          <button class="ctl" id="cMic" title="Microfone (Ctrl+Shift+A)"></button>
-          <button class="ctl" id="cCam" title="Câmera (Ctrl+Shift+V)"></button>
-          <button class="ctl" id="cScreen" title="Compartilhar tela"></button>
-          <button class="ctl" id="cDeaf" title="Desativar áudio (Ctrl+Shift+D)"></button>
-          <button class="ctl danger" id="cLeave" title="Sair da sala"></button>
-        </div>
+        <!-- Chat da sala de voz -->
+        <aside id="voiceChat" hidden>
+          <header class="vc-head"><span>💬 Chat da sala</span><button class="icon-btn" id="vcClose" title="Fechar">✕</button></header>
+          <div id="vcMessages" class="scroll"></div>
+          <form id="vcComposer">
+            <input id="vcInput" class="input" maxlength="2000" autocomplete="off" placeholder="Mensagem ou m!play <link ou música>">
+            <button class="btn primary" type="submit">➤</button>
+          </form>
+        </aside>
       </section>
     </main>
 

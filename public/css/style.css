@@ -204,7 +204,8 @@ input, select { font: inherit; color: inherit; }
 .chat-empty .big { font-size: 40px; }
 #composer { display: flex; gap: 8px; padding: 12px 16px 16px; flex: none; }
 
-#voiceView { position: relative; background: var(--stage); }
+#voiceView { position: relative; background: var(--stage); flex-direction: row !important; }
+.voice-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #voiceLobby { flex: 1; display: grid; place-items: center; padding: 20px; }
 .lobby-card { text-align: center; display: grid; gap: 14px; justify-items: center; max-width: 420px; }
 .lobby-icon { font-size: 44px; }
@@ -475,3 +476,42 @@ body.dragging-user .chan.voice:hover, .chan.voice.drop-over { background: color-
 .stage-strip .tile-vol { right: 4px; bottom: 4px; padding: 3px 6px; gap: 4px; }
 .stage-strip .tile-vol input { width: 60px; }
 .stage-strip .tile-vol-pct { display: none; }
+
+/* ------------------------------------------------ Chat da sala de voz */
+#voiceChat { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line); }
+.vc-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 700; }
+#vcMessages { flex: 1; padding: 10px 8px; display: flex; flex-direction: column; user-select: text; }
+#vcMessages .msg { grid-template-columns: 32px 1fr auto; gap: 8px; margin-top: 8px; }
+#vcMessages .msg .avatar { width: 32px; height: 32px; font-size: 12px; }
+#vcMessages .msg .body { font-size: 13.5px; }
+#vcComposer { display: flex; gap: 6px; padding: 10px; flex: none; border-top: 1px solid var(--line); }
+#vcComposer .btn { padding: 8px 12px; }
+.ctl .badge { position: absolute; top: 2px; right: 2px; background: var(--danger); color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px; font-weight: 800; }
+@media (max-width: 1000px) { #voiceChat { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; box-shadow: var(--shadow); } }
+
+/* Mensagens do bot */
+.avatar.bot { background: linear-gradient(135deg, #8b5cf6, #22d3ee); color: #fff; font-size: 16px; }
+.bot-tag { font-size: 9.5px; font-weight: 800; background: #5865f2; color: #fff; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
+.msg.bot .body { background: rgba(139, 92, 246, .1); border-left: 3px solid #8b5cf6; padding: 6px 10px; border-radius: 6px; margin-top: 2px; }
+.msg.cmd .body { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+/* ------------------------------------------------ Barra "tocando agora" */
+#musicBar { flex: none; display: flex; align-items: center; gap: 14px; margin: 0 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+#musicPlayerWrap { width: 128px; height: 72px; border-radius: 8px; overflow: hidden; background: #000; flex: none; }
+#musicPlayerWrap iframe, #musicPlayer { width: 128px; height: 72px; display: block; border: 0; }
+.mb-info { flex: 1; min-width: 0; }
+.mb-title { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.mb-progress { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.mb-track { flex: 1; height: 4px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.mb-track i { display: block; height: 100%; width: 0; background: var(--accent); }
+.mb-ctl { display: flex; align-items: center; gap: 2px; flex: none; }
+.mb-ctl .icon-btn { font-size: 16px; }
+.mb-ctl .icon-btn.on { color: var(--accent); background: var(--hover); }
+.mb-vol { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
+.mb-vol input { width: 80px; accent-color: var(--accent); }
+.bot-vm .avatar { font-size: 10px; }
+@media (max-width: 720px) { #musicPlayerWrap, #musicPlayerWrap iframe, #musicPlayer { width: 96px; height: 54px; } .mb-vol { display: none; } }
+.queue-row { display: flex; gap: 8px; align-items: center; }
+.queue-row .q-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl.on { background: rgba(34, 211, 238, .2); color: var(--accent); }

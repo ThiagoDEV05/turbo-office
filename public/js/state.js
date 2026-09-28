@@ -14,7 +14,8 @@ export const state = {
   deafened: false,
   modMuted: false,        // mutado por Gestor/Admin
   connected: false,
-  calendar: null,         // { connected, error?, events: [{start,end}] } — só horários
+  calendar: null,
+  music: new Map(),       // room_id -> estado do bot de música (fila, música atual)         // { connected, error?, events: [{start,end}] } — só horários
 };
 
 export const bus = new EventTarget();

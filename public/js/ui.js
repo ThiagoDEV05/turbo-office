@@ -166,8 +166,12 @@ function roomEntry(r, unreadOf) {
     h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, edit);
   btn.querySelector('.ico').innerHTML = icons.speaker;
   const out = [btn];
-  if (inside.length) {
+  const music = state.music.get(r.id)?.current;
+  if (inside.length || music) {
     const list = h('div', { class: 'voice-members' });
+    // O bot aparece dentro da sala enquanto toca, como no Discord
+    if (music) list.append(h('div', { class: 'vm bot-vm', title: `Tocando: ${music.title}` }, h('span', { class: 'avatar xs bot' }, '🎵'),
+      h('span', { class: 'nm' }, 'Turbo Music'), h('span', { class: 'flags' }, music.paused_at != null ? '⏸' : '🎶')));
     for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
       const p = state.presence.get(id);
       const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
@@ -342,6 +346,7 @@ export function renderVoiceView() {
 }
 
 // ------------------------------------------------------------------ Popovers
+export const openPopoverAt = (anchor, build, side) => showPopover(anchor, build, side);
 export function closePopover() { $('#popover').hidden = true; }
 function showPopover(anchor, build, side = 'auto') {
   const el = $('#popover');

@@ -100,7 +100,7 @@ export async function startNet(client) {
 
   makers.db = () => {
     dbch = sb.channel('turbo:db', { config: { private: true } });
-    for (const table of ['messages', 'categories', 'rooms', 'profiles', 'bans']) {
+    for (const table of ['messages', 'categories', 'rooms', 'profiles', 'bans', 'room_music']) {
       dbch.on('postgres_changes', { event: '*', schema: 'public', table }, (p) => emit(`db:${table}`, p));
     }
     dbch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mod_actions', filter: `target=eq.${state.me}` }, (p) => emit('db:mod', p.new));

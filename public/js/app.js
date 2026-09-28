@@ -6,6 +6,7 @@ import * as net from './net.js';
 import * as rtc from './rtc.js';
 import * as ui from './ui.js';
 import * as chat from './chat.js';
+import * as music from './music.js';
 import { applyPrefs, loadLocalPrefs, getPrefs } from './prefs.js';
 
 // Aplica o tema salvo no navegador antes de qualquer coisa (sem piscar)
@@ -27,6 +28,12 @@ function renderAll() {
     ui.renderUserPanel();
     ui.renderControls();
     ui.renderVoiceView();
+    const vKey = state.view?.type === 'voice' ? `room:${state.view.id}` : null;
+    $('#voiceChat').hidden = !chat.voiceChatKey();
+    $('#cChat').classList.toggle('on', !!chat.voiceChatKey());
+    const vUnread = vKey && !chat.voiceChatKey() ? chat.unreadOf(vKey) : 0;
+    $('#cChatBadge').hidden = !vUnread;
+    $('#cChatBadge').textContent = vUnread > 99 ? '99+' : String(vUnread);
     $('#adminBtn').hidden = myRank() < 2;
     ui.renderServerSettings();
   });
@@ -142,6 +149,7 @@ function selectView(view) {
   $('#voiceView').hidden = !isVoice;
   $('#layout').classList.remove('nav-open');
   applyMembersPref();
+  if (isVoice && chat.voiceChatKey()) chat.openChannel(chat.voiceChatKey());
   if (view && !isVoice) {
     chat.openChannel(chat.currentKey());
     chat.renderComposer();
@@ -168,6 +176,7 @@ async function joinVoice(roomId) {
   }
   rtc.publishMedia();
   rtc.updatePeers();
+  music.onRoomChange();
 }
 
 function leaveVoice(silent = false) {
@@ -179,6 +188,7 @@ function leaveVoice(silent = false) {
   state.modMuted = false;
   setMeta({ room: null });
   rtc.publishMedia();
+  music.onRoomChange();
   if (!silent) ui.sounds.leave();
   renderAll();
 }
@@ -421,6 +431,7 @@ function bindEvents() {
   const toggleDeaf = () => {
     rtc.toggleDeaf();
     state.deafened ? ui.sounds.mute() : ui.sounds.unmute();
+    music.applyVolume();
     ui.renderControls();
   };
   const toggleCam = async () => { if (state.voiceRoom) { await rtc.toggleCam(); ui.renderControls(); } };
@@ -441,6 +452,11 @@ function bindEvents() {
   $('#adminBtn').onclick = () => ui.openServerSettings();
   $('#serverName').onclick = () => { if (myRank() >= 2) ui.openServerSettings(); };
   $('#composer').onsubmit = (e) => { e.preventDefault(); chat.sendMessage(); };
+  $('#vcComposer').onsubmit = (e) => { e.preventDefault(); chat.sendVoiceMessage(); };
+  $('#cChat').onclick = () => { chat.setVoiceChatOpen(!chat.isVoiceChatOpen()); renderAll(); if (chat.voiceChatKey()) setTimeout(() => $('#vcInput').focus(), 0); };
+  $('#vcClose').onclick = () => { chat.setVoiceChatOpen(false); renderAll(); };
+  on('voice-chat', renderAll);
+  on('music', renderAll);
   $('#spotClose').onclick = ui.closeSpotlight;
   $('#navToggle').onclick = () => $('#layout').classList.toggle('nav-open');
   $('#membersToggle').onclick = () => {
@@ -505,6 +521,8 @@ async function boot() {
   await loadRooms();
   await loadBans();
   await chat.initChat(sb);
+  chat.setCommandHandler((text, key) => music.handleCommand(text, key));
+  await music.initMusic(sb);
   rtc.setIceServers(state.cfg.iceServers || []);
   loadIceServers();
   setInterval(loadIceServers, 3 * 3600e3);
