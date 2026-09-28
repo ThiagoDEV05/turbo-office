@@ -91,6 +91,19 @@ async function checkMyBan() {
   if (data && activeBan(data)) showBanned(data);
 }
 
+// ------------------------------------------------------------------ Servidores de rede (STUN + TURN)
+// O TURN retransmite áudio/vídeo quando duas redes não conseguem se ligar direto (CGNAT etc.).
+// As credenciais só vêm para quem está logado.
+async function loadIceServers() {
+  try {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) return;
+    const r = await fetch('/api/ice', { headers: { Authorization: `Bearer ${data.session.access_token}` } });
+    const j = await r.json();
+    if (Array.isArray(j.iceServers) && j.iceServers.length) rtc.setIceServers(j.iceServers);
+  } catch (e) { console.warn('ICE', e); }
+}
+
 // ------------------------------------------------------------------ Agenda (link iCal)
 let calEvents = [];
 async function loadCalendar() {
@@ -493,6 +506,8 @@ async function boot() {
   await loadBans();
   await chat.initChat(sb);
   rtc.setIceServers(state.cfg.iceServers || []);
+  loadIceServers();
+  setInterval(loadIceServers, 3 * 3600e3);
   ui.setActions(actions);
   rtc.initStage($('#stage'));
   bindEvents();

@@ -70,13 +70,18 @@ function tunePeer(peer) {
   const q = getScreenQuality();
   const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
   const fpsBoost = q.fps >= 60 ? 1.6 : q.fps <= 15 ? 0.7 : 1;
+  // Conexão passando pelo servidor TURN (retransmitida): usa menos dados para a cota grátis durar.
+  // Voz continua igual; câmera 1 Mbps; tela até ~1080p (4 Mbps) a no máximo 30 fps.
+  const relayed = !!peer.relayed;
   if (ts[0]) setEncoding(ts[0].sender, { maxBitrate: 128_000, priority: 'high', networkPriority: 'high' });
-  if (ts[1]) setEncoding(ts[1].sender, { maxBitrate: 2_500_000, maxFramerate: 30 });
+  if (ts[1]) setEncoding(ts[1].sender, { maxBitrate: relayed ? 1_000_000 : 2_500_000, maxFramerate: 30 });
   // Banda total de upload para a tela (~40 Mbps) dividida entre quem está assistindo, mínimo 4 Mbps cada
   const viewers = Math.max(1, peers.size);
-  const screenBitrate = Math.min(preset.bitrate * fpsBoost, Math.max(4_000_000, 40_000_000 / viewers));
-  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(screenBitrate), maxFramerate: q.fps, priority: 'high' },
-    { degradationPreference: q.fps >= 60 ? 'maintain-framerate' : 'maintain-resolution' });
+  let screenBitrate = Math.min(preset.bitrate * fpsBoost, Math.max(4_000_000, 40_000_000 / viewers));
+  if (relayed) screenBitrate = Math.min(screenBitrate, 4_000_000);
+  const fps = relayed ? Math.min(q.fps, 30) : q.fps;
+  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(screenBitrate), maxFramerate: fps, priority: 'high' },
+    { degradationPreference: fps >= 60 ? 'maintain-framerate' : 'maintain-resolution' });
   if (ts[3]) setEncoding(ts[3].sender, { maxBitrate: 256_000 });
 }
 
@@ -300,7 +305,7 @@ function createPeer(id, initiator) {
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') { failures.set(id, (failures.get(id) || 0) + 1); closePeer(id, true); }
-    if (pc.connectionState === 'connected') failures.delete(id);
+    if (pc.connectionState === 'connected') { failures.delete(id); detectRelay(peer); }
     if (pc.connectionState === 'connected') for (const p of peers.values()) tunePeer(p);
     emit('tiles');
   };
@@ -320,6 +325,19 @@ function iceGathered(pc) {
     pc.addEventListener('icegatheringstatechange', check);
     pc.addEventListener('icecandidate', cand);
   });
+}
+
+// A conexão escolhida passa pelo TURN? (rota "relay" em algum dos lados)
+async function detectRelay(peer) {
+  try {
+    const stats = await peer.pc.getStats();
+    let pairId = null;
+    stats.forEach((r) => { if (r.type === 'transport' && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId; });
+    stats.forEach((r) => { if (!pairId && r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pairId = r.id; });
+    const pair = pairId && stats.get(pairId);
+    const relayed = !!pair && [stats.get(pair.localCandidateId), stats.get(pair.remoteCandidateId)].some((c) => c?.candidateType === 'relay');
+    if (relayed !== !!peer.relayed) { peer.relayed = relayed; tunePeer(peer); emit('tiles'); }
+  } catch {}
 }
 
 // Rotas que aparecem depois do convite já enviado: manda em lotes (trickle ICE)
@@ -469,7 +487,7 @@ export function updatePeers() {
 export function closeAll() { for (const id of [...peers.keys()]) closePeer(id, true); }
 export const peerState = (id) => peers.get(id)?.pc.connectionState || null;
 // Diagnóstico (console): turbo.rtc.debugPeers()
-export const debugPeers = () => [...peers.values()].map((p) => ({ id: p.id, state: p.pc.connectionState, pc: p.pc }));
+export const debugPeers = () => [...peers.values()].map((p) => ({ id: p.id, state: p.pc.connectionState, relayed: !!p.relayed, pc: p.pc }));
 
 // ------------------------------------------------------------------ Quem está falando
 const analysers = new Map();
