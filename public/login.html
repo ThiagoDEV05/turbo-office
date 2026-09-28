@@ -44,6 +44,8 @@
 
   <script type="module">
     import { getSupabase, getConfig } from '/js/supa.js';
+    import { applyPrefs, loadLocalPrefs } from '/js/prefs.js';
+    applyPrefs(loadLocalPrefs());
 
     const form = document.getElementById('authForm');
     const err = document.getElementById('error');

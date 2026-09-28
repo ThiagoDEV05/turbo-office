@@ -19,6 +19,27 @@ alter table public.profiles add column if not exists avatar_url text;
 alter table public.profiles drop constraint if exists profiles_avatar_url_check;
 alter table public.profiles add constraint profiles_avatar_url_check check (avatar_url is null or avatar_url ~ '^https://[^\s"'')]+$');
 
+-- Personalização do perfil ("Nitro" liberado para todos)
+alter table public.profiles add column if not exists bio text;
+alter table public.profiles add column if not exists pronouns text;
+alter table public.profiles add column if not exists banner_color text;
+alter table public.profiles add column if not exists banner_color2 text;
+alter table public.profiles add column if not exists banner_url text;
+alter table public.profiles add column if not exists name_color text;
+alter table public.profiles add column if not exists decoration text;
+alter table public.profiles add column if not exists prefs jsonb not null default '{}'::jsonb;
+alter table public.profiles drop constraint if exists profiles_custom_check;
+alter table public.profiles add constraint profiles_custom_check check (
+  (bio is null or char_length(bio) <= 190)
+  and (pronouns is null or char_length(pronouns) <= 40)
+  and (banner_color is null or banner_color ~ '^#[0-9a-fA-F]{6}$')
+  and (banner_color2 is null or banner_color2 ~ '^#[0-9a-fA-F]{6}$')
+  and (name_color is null or name_color ~ '^#[0-9a-fA-F]{6}$')
+  and (banner_url is null or banner_url ~ '^https://[^\s"'')]+$')
+  and (decoration is null or decoration in ('neon', 'fogo', 'ouro', 'arco-iris', 'gelo', 'turbo'))
+  and pg_column_size(prefs) <= 4000
+);
+
 -- Banimentos: quem está banido (até "until", ou para sempre se null) perde o acesso a tudo.
 create table if not exists public.bans (
   user_id uuid primary key references public.profiles(id) on delete cascade,
@@ -99,7 +120,8 @@ begin
     if my_rank() < 3 then raise exception 'Só Admin pode mudar cargos'; end if;
     if old.id = auth.uid() then raise exception 'Você não pode mudar o próprio cargo'; end if;
   end if;
-  if old.id <> auth.uid() and (new.name <> old.name or new.color <> old.color or new.avatar_url is distinct from old.avatar_url) then
+  -- Qualquer campo além do cargo só pode ser alterado pela própria pessoa
+  if old.id <> auth.uid() and (to_jsonb(new) - 'role') is distinct from (to_jsonb(old) - 'role') then
     raise exception 'Só a própria pessoa edita o perfil';
   end if;
   return new;

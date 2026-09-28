@@ -137,37 +137,22 @@
     </form>
   </div>
 
-  <!-- Configurações do perfil e dispositivos -->
+  <!-- Configurações do usuário: perfil, aparência, voz e vídeo -->
   <div id="settingsModal" class="modal" hidden>
-    <div class="modal-card settings">
-      <div>
-        <h2>Configurações</h2>
-        <div class="photo-edit">
-          <span class="avatar xl" id="setPhoto"></span>
-          <div class="photo-actions">
-            <label class="btn" for="photoInput">Enviar foto</label>
-            <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp" hidden>
-            <button class="btn danger-outline" type="button" id="photoRemove">Remover</button>
-            <span class="muted small">JPG, PNG ou WebP. A imagem é recortada em quadrado.</span>
-          </div>
-        </div>
-        <label class="field"><span>Seu nome</span><input class="input" id="setName" maxlength="32"></label>
-        <div class="field"><span>Cor (usada quando não há foto)</span><div id="colorSwatches" class="swatches"></div></div>
-        <div class="set-preview"><span class="avatar lg" id="setAvatar"></span><div><div id="setPreviewName" class="strong"></div><div class="muted small" id="setEmail"></div></div></div>
-      </div>
-      <div>
-        <div class="preview off" id="camPreview"><video autoplay playsinline muted></video><div class="preview-off">Câmera desligada</div></div>
-        <button class="btn block" id="testCam" type="button">Testar câmera</button>
-        <label class="field"><span>Microfone</span><select id="micSelect" class="input"></select></label>
-        <label class="field" id="spkField"><span>Saída de áudio (fone / alto-falante)</span><select id="spkSelect" class="input"></select></label>
-        <label class="field"><span>Câmera</span><select id="camSelect" class="input"></select></label>
-      </div>
-      <div class="modal-actions full">
-        <p class="error" id="setError"></p>
+    <div class="modal-card usettings">
+      <nav class="set-nav">
+        <div class="srv-title">Configurações</div>
+        <button class="srv-tab" data-tab="profile">🪪 Meu perfil</button>
+        <button class="srv-tab" data-tab="appearance">🎨 Aparência</button>
+        <button class="srv-tab" data-tab="voice">🎙️ Voz e vídeo</button>
         <span class="spacer"></span>
-        <button class="btn" data-close>Cancelar</button>
-        <button class="btn primary" id="setSave">Salvar</button>
-      </div>
+        <button class="srv-tab" data-tab="logout">🚪 Sair</button>
+      </nav>
+      <section class="set-body">
+        <div class="modal-top"><h2 id="setHeading">Meu perfil</h2><button class="icon-btn" data-close title="Fechar (Esc)">✕</button></div>
+        <div id="setContent"></div>
+        <p class="error" id="setError"></p>
+      </section>
     </div>
   </div>
 

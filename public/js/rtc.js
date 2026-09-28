@@ -5,13 +5,82 @@
 import { state, emit, on, displayName, colorOf, initials, membersIn, photoOf } from './state.js';
 import { sendTo, setMeta } from './net.js';
 
-const SLOTS = ['audio', 'cam', 'screen'];
-const KINDS = ['audio', 'video', 'video'];
+// 4 canais fixos por conexão: voz, câmera, tela e som da tela
+const SLOTS = ['audio', 'cam', 'screen', 'screenAudio'];
+const KINDS = ['audio', 'video', 'video', 'audio'];
+const NSLOTS = SLOTS.length;
+
+// ---------------------------------------------------------------- Qualidade (tudo liberado)
+export const SCREEN_PRESETS = {
+  '720': { label: '720p', w: 1280, h: 720, bitrate: 2_500_000 },
+  '1080': { label: '1080p', w: 1920, h: 1080, bitrate: 6_000_000 },
+  '1440': { label: '1440p', w: 2560, h: 1440, bitrate: 10_000_000 },
+  '4k': { label: '4K', w: 3840, h: 2160, bitrate: 18_000_000 },
+};
+const readJSON = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
+export const getScreenQuality = () => readJSON('to.screenq', { res: '1080', fps: 30, audio: true });
+export const setScreenQuality = (patch) => localStorage.setItem('to.screenq', JSON.stringify({ ...getScreenQuality(), ...patch }));
+export const getAudioProcessing = () => readJSON('to.audio', { noiseSuppression: true, echoCancellation: true, autoGainControl: true });
+export async function setAudioProcessing(patch) {
+  localStorage.setItem('to.audio', JSON.stringify({ ...getAudioProcessing(), ...patch }));
+  if (local.mic) await startMic();
+  emit('audio-processing');
+}
+
+// Opus em alta: estéreo, até 510 kbps, correção de perda de pacote (FEC), sem DTX
+function tuneOpus(sdp) {
+  const m = /a=rtpmap:(\d+) opus\/48000\/2/i.exec(sdp);
+  if (!m) return sdp;
+  const pt = m[1];
+  const extra = { stereo: '1', 'sprop-stereo': '1', maxaveragebitrate: '510000', useinbandfec: '1', usedtx: '0' };
+  const re = new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`, 'g');
+  if (sdp.includes(`a=fmtp:${pt} `)) {
+    return sdp.replace(re, (line, params) => {
+      const kv = Object.fromEntries(params.split(';').filter(Boolean).map((x) => x.trim().split('=')));
+      return `a=fmtp:${pt} ${Object.entries({ ...kv, ...extra }).map(([k, v]) => `${k}=${v}`).join(';')}`;
+    });
+  }
+  return sdp.split(m[0]).join(`${m[0]}\r\na=fmtp:${pt} ${Object.entries(extra).map(([k, v]) => `${k}=${v}`).join(';')}`);
+}
+
+// VP9 primeiro para a tela (texto nítido com menos banda); os demais codecs continuam como reserva
+function preferScreenCodec(transceiver) {
+  try {
+    const caps = RTCRtpReceiver.getCapabilities?.('video')?.codecs;
+    if (!caps || !transceiver.setCodecPreferences) return;
+    const rank = (c) => (/vp9/i.test(c.mimeType) ? 0 : /av1/i.test(c.mimeType) ? 1 : /h264/i.test(c.mimeType) ? 2 : 3);
+    transceiver.setCodecPreferences([...caps].sort((a, b) => rank(a) - rank(b)));
+  } catch {}
+}
+
+async function setEncoding(sender, enc, extra = {}) {
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) return;
+    Object.assign(params.encodings[0], enc);
+    Object.assign(params, extra);
+    await sender.setParameters(params);
+  } catch {}
+}
+
+// Aplica taxas de bits e prioridades em todos os envios de uma conexão
+function tunePeer(peer) {
+  const ts = peer.pc.getTransceivers();
+  const q = getScreenQuality();
+  const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
+  const fpsBoost = q.fps >= 60 ? 1.6 : q.fps <= 15 ? 0.7 : 1;
+  if (ts[0]) setEncoding(ts[0].sender, { maxBitrate: 128_000, priority: 'high', networkPriority: 'high' });
+  if (ts[1]) setEncoding(ts[1].sender, { maxBitrate: 2_500_000, maxFramerate: 30 });
+  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(preset.bitrate * fpsBoost), maxFramerate: q.fps, priority: 'high' },
+    { degradationPreference: q.fps >= 60 ? 'maintain-framerate' : 'maintain-resolution' });
+  if (ts[3]) setEncoding(ts[3].sender, { maxBitrate: 256_000 });
+}
 
 export const local = {
   mic: null,
   cam: null,
   screen: null,
+  screenAudio: null,
   micOn: localStorage.getItem('to.micOn') !== '0',
   micDeviceId: localStorage.getItem('to.mic') || undefined,
   camDeviceId: localStorage.getItem('to.cam') || undefined,
@@ -24,7 +93,7 @@ export const canPickSpeaker = typeof HTMLMediaElement !== 'undefined' && 'setSin
 export async function setSpeaker(deviceId) {
   local.speakerDeviceId = deviceId;
   localStorage.setItem('to.speaker', deviceId);
-  for (const p of peers.values()) p.audioEl.setSinkId?.(deviceId).catch(() => {});
+  for (const p of peers.values()) for (const el of [p.audioEl, p.screenAudioEl]) el.setSinkId?.(deviceId).catch(() => {});
   emit('speaker', deviceId);
 }
 
@@ -34,14 +103,14 @@ const userVolume = new Map(); // id -> 0..1 (ajuste local)
 let audioCtx = null;
 
 export function setIceServers(s) { iceServers = s; }
-const localTrack = (slot) => (slot === 0 ? local.mic : slot === 1 ? local.cam : local.screen);
+const localTrack = (slot) => [local.mic, local.cam, local.screen, local.screenAudio][slot] || null;
 const micLive = () => !!(local.mic && local.micOn && !state.modMuted && !state.deafened);
 
 // ------------------------------------------------------------------ Mídia local
 export async function startMic() {
   try {
     const s = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: local.micDeviceId ? { exact: local.micDeviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: { deviceId: local.micDeviceId ? { exact: local.micDeviceId } : undefined, ...getAudioProcessing(), sampleRate: 48000, channelCount: 1 },
     });
     local.mic?.stop();
     local.mic = s.getAudioTracks()[0];
@@ -59,7 +128,7 @@ export async function startMic() {
 export async function startCam() {
   try {
     const s = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: local.camDeviceId ? { exact: local.camDeviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } },
+      video: { deviceId: local.camDeviceId ? { exact: local.camDeviceId } : undefined, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
     });
     local.cam?.stop();
     local.cam = s.getVideoTracks()[0];
@@ -98,7 +167,7 @@ export function toggleDeaf() {
   publishMedia();
 }
 
-function applyDeaf() { for (const p of peers.values()) p.audioEl.muted = state.deafened; }
+function applyDeaf() { for (const p of peers.values()) { p.audioEl.muted = state.deafened; p.screenAudioEl.muted = state.deafened; } }
 
 export function forceMute(muted) {
   state.modMuted = muted;
@@ -112,14 +181,24 @@ export async function toggleCam() {
   return !!local.cam;
 }
 
-export async function toggleScreen() {
+export async function toggleScreen(opts) {
   if (local.screen) { stopScreen(); return false; }
+  const q = { ...getScreenQuality(), ...(opts || {}) };
+  const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
   try {
-    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15 } }, audio: false });
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      video: { width: { ideal: preset.w }, height: { ideal: preset.h }, frameRate: { ideal: q.fps, max: q.fps } },
+      audio: q.audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: 48000, channelCount: 2 } : false,
+      systemAudio: 'include', surfaceSwitching: 'include', selfBrowserSurface: 'exclude',
+    });
     local.screen = s.getVideoTracks()[0];
-    local.screen.contentHint = 'detail';
+    local.screen.contentHint = q.fps >= 60 ? 'motion' : 'detail';
     local.screen.onended = stopScreen;
+    local.screenAudio = s.getAudioTracks()[0] || null;
+    if (local.screenAudio) local.screenAudio.contentHint = 'music';
     replaceAll(2, local.screen);
+    replaceAll(3, local.screenAudio);
+    for (const p of peers.values()) tunePeer(p);
     publishMedia();
     return true;
   } catch { return false; }
@@ -127,8 +206,11 @@ export async function toggleScreen() {
 
 function stopScreen() {
   local.screen?.stop();
+  local.screenAudio?.stop();
   local.screen = null;
+  local.screenAudio = null;
   replaceAll(2, null);
+  replaceAll(3, null);
   publishMedia();
 }
 
@@ -136,6 +218,7 @@ export function stopAllMedia() {
   local.mic?.stop(); local.mic = null;
   local.cam?.stop(); local.cam = null;
   local.screen?.stop(); local.screen = null;
+  local.screenAudio?.stop(); local.screenAudio = null;
   stopWatching(state.me);
 }
 
@@ -155,7 +238,7 @@ export function publishMedia() {
 export function setUserVolume(id, v) {
   userVolume.set(id, v);
   const p = peers.get(id);
-  if (p) p.audioEl.volume = v;
+  if (p) { p.audioEl.volume = v; p.screenAudioEl.volume = v; }
 }
 export const getUserVolume = (id) => userVolume.get(id) ?? 1;
 
@@ -170,8 +253,12 @@ function createPeer(id, initiator) {
   audioEl.autoplay = true;
   audioEl.muted = state.deafened;
   audioEl.volume = getUserVolume(id);
-  if (local.speakerDeviceId && canPickSpeaker) audioEl.setSinkId(local.speakerDeviceId).catch(() => {});
-  const peer = { id, pc, initiator, streams: {}, audioEl, createdAt: Date.now(), staleSince: null };
+  const screenAudioEl = new Audio();
+  screenAudioEl.autoplay = true;
+  screenAudioEl.muted = state.deafened;
+  screenAudioEl.volume = getUserVolume(id);
+  if (local.speakerDeviceId && canPickSpeaker) for (const el of [audioEl, screenAudioEl]) el.setSinkId(local.speakerDeviceId).catch(() => {});
+  const peer = { id, pc, initiator, streams: {}, audioEl, screenAudioEl, createdAt: Date.now(), staleSince: null };
   peers.set(id, peer);
 
   pc.ontrack = (e) => {
@@ -182,11 +269,15 @@ function createPeer(id, initiator) {
       audioEl.srcObject = peer.streams.audio;
       audioEl.play().catch(() => {});
       watchSpeaking(id, peer.streams.audio);
+    } else if (key === 'screenAudio') {
+      screenAudioEl.srcObject = peer.streams.screenAudio;
+      screenAudioEl.play().catch(() => {});
     }
     emit('tiles');
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') closePeer(id, true);
+    if (pc.connectionState === 'connected') tunePeer(peer);
     emit('tiles');
   };
   return peer;
@@ -206,12 +297,14 @@ function iceGathered(pc) {
 async function connect(id) {
   const peer = createPeer(id, true);
   const { pc } = peer;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < NSLOTS; i++) {
     const t = pc.addTransceiver(KINDS[i], { direction: 'sendrecv' });
+    if (i === 2) preferScreenCodec(t);
     const track = localTrack(i);
     if (track) await t.sender.replaceTrack(track);
   }
-  await pc.setLocalDescription(await pc.createOffer());
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription({ type: 'offer', sdp: tuneOpus(offer.sdp) });
   await iceGathered(pc);
   if (peers.get(id) !== peer) return;
   sendTo(id, 'signal', { room: state.voiceRoom, data: { type: 'offer', sdp: pc.localDescription.toJSON() } });
@@ -223,6 +316,7 @@ export function closePeer(id, notify) {
   peers.delete(id);
   try { peer.pc.close(); } catch {}
   peer.audioEl.srcObject = null;
+  peer.screenAudioEl.srcObject = null;
   stopWatching(id);
   if (notify) sendTo(id, 'signal', { data: { type: 'bye' } });
   emit('tiles');
@@ -238,12 +332,14 @@ on('inbox:signal', async ({ from, room, data }) => {
       const { pc } = peer;
       await pc.setRemoteDescription(data.sdp);
       const ts = pc.getTransceivers();
-      for (let i = 0; i < ts.length && i < 3; i++) {
+      for (let i = 0; i < ts.length && i < NSLOTS; i++) {
         ts[i].direction = 'sendrecv';
+        if (i === 2) preferScreenCodec(ts[i]);
         const track = localTrack(i);
         if (track) await ts[i].sender.replaceTrack(track);
       }
-      await pc.setLocalDescription(await pc.createAnswer());
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription({ type: 'answer', sdp: tuneOpus(answer.sdp) });
       await iceGathered(pc);
       if (peers.get(from) !== peer) return;
       sendTo(from, 'signal', { data: { type: 'answer', sdp: pc.localDescription.toJSON() } });
@@ -279,6 +375,8 @@ export function updatePeers() {
 
 export function closeAll() { for (const id of [...peers.keys()]) closePeer(id, true); }
 export const peerState = (id) => peers.get(id)?.pc.connectionState || null;
+// Diagnóstico (console): turbo.rtc.debugPeers()
+export const debugPeers = () => [...peers.values()].map((p) => ({ id: p.id, state: p.pc.connectionState, pc: p.pc }));
 
 // ------------------------------------------------------------------ Quem está falando
 const analysers = new Map();

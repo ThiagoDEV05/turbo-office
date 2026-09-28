@@ -1,6 +1,6 @@
 // Chat: canais de texto e mensagens diretas, persistidos na tabela `messages` do Supabase.
 import { state, emit, on, rank, myRank, displayName, dmKey, dmOther, ROLES } from './state.js';
-import { $, h, avatar, toast, sounds } from './ui.js';
+import { $, h, avatar, toast, sounds, nameColor } from './ui.js';
 
 
 let sb = null;
@@ -103,7 +103,7 @@ export function renderMessages(forceBottom = false) {
     box.append(h('div', { class: `msg${cont ? ' cont' : ''}` },
       avatar(m.from),
       h('div', { style: 'min-width:0' },
-        cont ? null : h('div', { class: 'head' }, displayName(m.from), h('time', {}, fmtTime(m.ts))),
+        cont ? null : h('div', { class: 'head' }, h('span', { style: nameColor(state.profiles.get(m.from)) ? `color:${nameColor(state.profiles.get(m.from))}` : '' }, displayName(m.from)), h('time', {}, fmtTime(m.ts))),
         h('div', { class: 'body' }, linkify(m.text))),
       canDelete ? h('button', { class: 'icon-btn del', title: 'Apagar mensagem', onclick: () => deleteMessage(m.id) }, '🗑') : h('span')));
     prev = m;

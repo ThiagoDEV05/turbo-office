@@ -3,7 +3,11 @@ import {
   state, on, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
   displayName, colorOf, initials, membersIn, dmOther, photoOf,
 } from './state.js';
-import { local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker } from './rtc.js';
+import {
+  local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
+  getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality, SCREEN_PRESETS,
+} from './rtc.js';
+import { THEMES, GRADIENTS, ACCENTS, getPrefs, applyPrefs } from './prefs.js';
 
 export const $ = (s) => document.querySelector(s);
 export function h(tag, props = {}, ...children) {
@@ -37,17 +41,57 @@ let A = {}; // ações registradas pelo app.js
 export function setActions(actions) { A = actions; }
 
 // ------------------------------------------------------------------ Avatar
-export function avatar(id, size = '', withStatus = false) {
-  const p = state.profiles.get(id);
-  const photo = photoOf(id);
-  const el = photo
-    ? h('span', { class: `avatar photo ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background-image:url("${photo}")` })
-    : h('span', { class: `avatar ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background:${colorOf(id)}` }, initials(p?.name));
-  if (withStatus) {
-    const pr = state.presence.get(id);
-    el.append(h('span', { class: `st ${pr ? pr.status : 'offline'}` }));
-  }
+const SAFE_URL = /^https:\/\/[^\s"')]+$/;
+const HEX = /^#[0-9a-f]{6}$/i;
+export const DECORATIONS = { '': 'Nenhuma', neon: 'Neon', fogo: 'Fogo', ouro: 'Ouro', 'arco-iris': 'Arco-íris', gelo: 'Gelo', turbo: 'Turbo' };
+
+// Avatar a partir de um perfil (serve também para prévias com rascunho)
+export function avatarOf(p, size = '', status = null, speaking = false) {
+  const photo = SAFE_URL.test(p?.avatar_url || '') ? p.avatar_url : null;
+  const color = HEX.test(p?.color || '') ? p.color : '#64748b';
+  const cls = `avatar ${size}${photo ? ' photo' : ''}${speaking ? ' speaking' : ''}`;
+  const el = photo ? h('span', { class: cls, style: `background-image:url("${photo}")` }) : h('span', { class: cls, style: `background:${color}` }, initials(p?.name));
+  if (p?.decoration && DECORATIONS[p.decoration]) el.dataset.deco = p.decoration;
+  if (status) el.append(h('span', { class: `st ${status}` }));
   return el;
+}
+
+export function avatar(id, size = '', withStatus = false) {
+  const pr = state.presence.get(id);
+  return avatarOf(state.profiles.get(id), size, withStatus ? (pr ? pr.status : 'offline') : null, state.speaking.has(id));
+}
+
+// Cor do nome: a escolhida pela pessoa, senão a do cargo
+export function nameColor(p) {
+  if (HEX.test(p?.name_color || '')) return p.name_color;
+  return p && p.role !== 'membro' ? ROLES[p.role]?.color : '';
+}
+
+function bannerStyle(p) {
+  if (SAFE_URL.test(p?.banner_url || '')) return `background-image:url("${p.banner_url}")`;
+  const c1 = HEX.test(p?.banner_color || '') ? p.banner_color : (HEX.test(p?.color || '') ? p.color : '#22d3ee');
+  const c2 = HEX.test(p?.banner_color2 || '') ? p.banner_color2 : null;
+  return c2 ? `background:linear-gradient(135deg, ${c1}, ${c2})` : `background:${c1}`;
+}
+
+const memberSince = (iso) => (iso ? new Date(iso).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+
+// Cartão de perfil estilo Discord (faixa, avatar com moldura, status, bio, membro desde)
+export function profileCard(p, pr) {
+  const room = pr?.room && state.rooms.get(pr.room);
+  const handle = (p?.email || '').split('@')[0];
+  return h('div', { class: 'pcard' },
+    h('div', { class: 'pc-banner', style: bannerStyle(p) }),
+    h('div', { class: 'pc-head' }, avatarOf(p, 'xl', pr ? pr.status : 'offline'),
+      pr?.statusText ? h('div', { class: 'pc-bubble' }, pr.statusText) : null),
+    h('div', { class: 'pc-body' },
+      h('div', { class: 'pc-name', style: nameColor(p) ? `color:${nameColor(p)}` : '' }, p?.name || ''),
+      h('div', { class: 'pc-sub' }, [handle, p?.pronouns].filter(Boolean).join(' • ')),
+      h('div', { class: 'pc-badges' },
+        h('span', { class: 'role-badge', style: `color:${ROLES[p?.role]?.color || 'inherit'}` }, ROLES[p?.role]?.label || ''),
+        h('span', { class: 'role-badge' }, pr ? (room ? `🔊 ${room.name}` : STATUS_LABEL[pr.status]) : 'Offline')),
+      p?.bio ? h('div', { class: 'pc-sec' }, h('h4', {}, 'Sobre mim'), h('p', {}, p.bio)) : null,
+      h('div', { class: 'pc-sec' }, h('h4', {}, 'Membro desde'), h('p', {}, memberSince(p?.created_at)))));
 }
 
 // ------------------------------------------------------------------ Lista de canais
@@ -166,7 +210,7 @@ function memberRow(p, isOnline) {
   }
   return h('div', { class: `member${isOnline ? '' : ' offline'}`, onclick: (e) => openMemberPopover(p.id, e.currentTarget) },
     avatar(p.id, 'sm', true),
-    h('div', { class: 'info' }, h('div', { class: 'name', style: `color:${p.role === 'membro' ? 'inherit' : ROLES[p.role].color}` }, p.name), sub ? h('div', { class: 'sub' }, sub) : null));
+    h('div', { class: 'info' }, h('div', { class: 'name', style: nameColor(p) ? `color:${nameColor(p)}` : '' }, p.name), sub ? h('div', { class: 'sub' }, sub) : null));
 }
 
 // ------------------------------------------------------------------ Cabeçalho, painel do usuário e controles
@@ -258,6 +302,7 @@ export function closePopover() { $('#popover').hidden = true; }
 function showPopover(anchor, build, side = 'auto') {
   const el = $('#popover');
   el.innerHTML = '';
+  el.className = 'popover';
   build(el);
   el.hidden = false;
   const a = anchor.getBoundingClientRect();
@@ -277,41 +322,39 @@ export function openMemberPopover(id, anchor) {
     const pr = state.presence.get(id);
     const isMe = id === state.me;
     const room = pr?.room && state.rooms.get(pr.room);
-    el.append(h('div', { class: 'pop-head' }, avatar(id, 'lg', true), h('div', {},
-      h('div', { class: 'name' }, p.name),
-      h('span', { class: 'role-badge', style: `color:${ROLES[p.role].color}` }, ROLES[p.role].label),
-      h('div', { class: 'muted small', style: 'margin-top:4px' }, p.email))));
-    el.append(h('div', { class: 'pop-row muted' }, pr ? `${pr.statusText || STATUS_LABEL[pr.status]}${room ? ` · 🔊 ${room.name}` : ''}` : 'Offline'));
-    el.append(h('div', { class: 'menu-sep' }));
+    el.classList.add('profile');
+    el.append(profileCard(p, pr));
+    const box = h('div', { class: 'pc-acts' });
+    el.append(box);
     if (isMe) {
-      el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings(); } }, '⚙️ Editar perfil'));
+      box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings('profile'); } }, '✏️ Editar perfil'));
       return;
     }
-    el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.selectView({ type: 'dm', id }); } }, '💬 Mensagem'));
-    if (pr && state.voiceRoom && pr.room !== state.voiceRoom) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.ring(id); } }, '🔔 Chamar para minha sala'));
-    if (pr?.room && pr.room !== state.voiceRoom && state.rooms.has(pr.room)) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.joinVoice(pr.room); } }, `🔊 Entrar em ${room.name}`));
+    box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.selectView({ type: 'dm', id }); } }, '💬 Mensagem'));
+    if (pr && state.voiceRoom && pr.room !== state.voiceRoom) box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.ring(id); } }, '🔔 Chamar para minha sala'));
+    if (pr?.room && pr.room !== state.voiceRoom && state.rooms.has(pr.room)) box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.joinVoice(pr.room); } }, `🔊 Entrar em ${room.name}`));
     if (state.voiceRoom && pr?.room === state.voiceRoom) {
       const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: getUserVolume(id) });
       range.oninput = () => setUserVolume(id, Number(range.value));
-      el.append(h('div', { class: 'menu-label' }, 'Volume para você'), h('div', { class: 'pop-row' }, range));
+      box.append(h('div', { class: 'menu-label' }, 'Volume para você'), h('div', { class: 'pop-row' }, range));
     }
     if (canModerate(id)) {
-      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'));
+      box.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'));
       if (pr?.room) {
-        el.append(
+        box.append(
           h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'mute'); } }, '🔇 Mutar na sala'),
           h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'unmute'); } }, '🎙️ Desmutar'),
           h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'kick'); } }, '⏏ Remover da sala'));
       }
-      if (pr) el.append(h('button', { class: 'menu-item', onclick: () => openMoveMenu(id, anchor) }, '↪️ Mover para outra sala…'));
+      if (pr) box.append(h('button', { class: 'menu-item', onclick: () => openMoveMenu(id, anchor) }, '↪️ Mover para outra sala…'));
       const ban = state.bans.get(id);
-      if (ban) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.unban(id); } }, `✅ Desbanir (${banLabel(ban)})`));
-      else el.append(h('button', { class: 'menu-item danger', onclick: () => openBanMenu(id, anchor) }, '⛔ Banir…'));
+      if (ban) box.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.unban(id); } }, `✅ Desbanir (${banLabel(ban)})`));
+      else box.append(h('button', { class: 'menu-item danger', onclick: () => openBanMenu(id, anchor) }, '⛔ Banir…'));
     }
     if (myRank() === 3) {
       const sel = h('select', { class: 'input' }, ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
       sel.onchange = () => A.setRole(id, sel.value);
-      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Cargo'), h('div', { class: 'pop-row' }, sel));
+      box.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Cargo'), h('div', { class: 'pop-row' }, sel));
     }
   });
 }
@@ -353,7 +396,7 @@ export async function openDeviceMenu(kind, anchor) {
         },
       }, h('span', { class: 'radio' }), h('span', { class: 'lbl' }, d.label || `Dispositivo ${i + 1}`)));
     });
-    el.append(h('div', { class: 'menu-sep' }), h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings(); } }, '⚙️ Configurações de voz, vídeo e perfil'));
+    el.append(h('div', { class: 'menu-sep' }), h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings('voice'); } }, '⚙️ Configurações de voz e vídeo'));
   }, 'above');
 }
 
@@ -519,96 +562,289 @@ export function openCategoryModal(cat) {
 
 // ------------------------------------------------------------------ Modal: configurações
 let testStream = null;
-// Recorta a imagem em quadrado e reduz para 256px (arquivo pequeno, carrega rápido)
-async function squareImage(file, size = 256) {
+let meterStream = null;
+let meterTimer = null;
+
+// Recorta a imagem no formato pedido (avatar 256x256, faixa 960x384) e comprime
+async function cropImage(file, w, hgt) {
   const bmp = await createImageBitmap(file);
-  const side = Math.min(bmp.width, bmp.height);
+  const ratio = w / hgt;
+  let sw = bmp.width, sh = bmp.width / ratio;
+  if (sh > bmp.height) { sh = bmp.height; sw = sh * ratio; }
   const c = document.createElement('canvas');
-  c.width = c.height = size;
-  c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
+  c.width = w; c.height = hgt;
+  c.getContext('2d').drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, w, hgt);
   return new Promise((resolve) => c.toBlob(resolve, 'image/webp', 0.88));
 }
 
-export function openSettings() {
+const switchRow = (title, desc, checked, onchange) => {
+  const input = h('input', { type: 'checkbox', checked });
+  input.onchange = () => onchange(input.checked);
+  return h('div', { class: 'switch-row' }, h('div', {}, h('div', { class: 't' }, title), desc ? h('div', { class: 'd' }, desc) : null), h('label', { class: 'switch' }, input, h('span')));
+};
+
+let setTab = 'profile';
+let draft = null;
+
+export function openSettings(tab = 'profile') {
   const modal = $('#settingsModal');
   const p = myProfile();
-  const draft = { name: p.name, color: p.color, avatar_url: p.avatar_url || null };
-  const nameInput = $('#setName');
-  nameInput.value = draft.name;
-  $('#setEmail').textContent = `${p.email} · ${ROLES[p.role].label}`;
-  $('#setError').textContent = '';
-  const paint = (el) => {
-    if (draft.avatar_url) { el.className = `${el.className.replace(/\bphoto\b/g, '').trim()} photo`; el.style.background = ''; el.style.backgroundImage = `url("${draft.avatar_url}")`; el.textContent = ''; }
-    else { el.classList.remove('photo'); el.style.backgroundImage = ''; el.style.background = draft.color; el.textContent = initials(draft.name); }
+  draft = {
+    name: p.name, color: p.color, avatar_url: p.avatar_url || null, banner_url: p.banner_url || null,
+    banner_color: p.banner_color || null, banner_color2: p.banner_color2 || null, name_color: p.name_color || null,
+    pronouns: p.pronouns || '', bio: p.bio || '', decoration: p.decoration || '',
   };
-  const refresh = () => {
-    paint($('#setAvatar'));
-    paint($('#setPhoto'));
-    $('#photoRemove').hidden = !draft.avatar_url;
-    $('#setPreviewName').textContent = draft.name || '—';
-    const sw = $('#colorSwatches');
-    sw.innerHTML = '';
-    for (const c of COLORS) sw.append(h('button', { class: `sw${c === draft.color ? ' sel' : ''}`, type: 'button', style: `background:${c}`, onclick: () => { draft.color = c; refresh(); } }));
-  };
-  nameInput.oninput = () => { draft.name = nameInput.value; refresh(); };
-  $('#photoInput').value = '';
-  $('#photoInput').onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    $('#setError').textContent = '';
-    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { $('#setError').textContent = 'Use uma imagem JPG, PNG ou WebP.'; return; }
-    const label = document.querySelector('label[for=photoInput]');
-    label.textContent = 'Enviando…';
-    try {
-      const blob = await squareImage(file);
-      const { url, error } = await A.uploadPhoto(blob);
-      if (error) $('#setError').textContent = error; else { draft.avatar_url = url; refresh(); }
-    } catch { $('#setError').textContent = 'Não foi possível ler essa imagem.'; }
-    label.textContent = 'Enviar foto';
-  };
-  $('#photoRemove').onclick = () => { draft.avatar_url = null; refresh(); };
-  refresh();
-
-  const preview = $('#camPreview');
-  const stopTest = () => { testStream?.getTracks().forEach((t) => t.stop()); testStream = null; preview.querySelector('video').srcObject = null; preview.classList.add('off'); $('#testCam').textContent = 'Testar câmera'; };
-  $('#testCam').onclick = async () => {
-    if (testStream) return stopTest();
-    try {
-      testStream = await navigator.mediaDevices.getUserMedia({ video: local.camDeviceId ? { deviceId: { exact: local.camDeviceId } } : true });
-      preview.querySelector('video').srcObject = testStream;
-      preview.classList.remove('off');
-      $('#testCam').textContent = 'Parar teste';
-      fillDevices();
-    } catch { $('#setError').textContent = 'Não foi possível acessar a câmera.'; }
-  };
-  $('#micSelect').onchange = (e) => switchDevice('mic', e.target.value);
-  $('#spkSelect').onchange = (e) => { setSpeaker(e.target.value); sounds.message(); };
-  $('#camSelect').onchange = async (e) => { await switchDevice('cam', e.target.value); if (testStream) { stopTest(); $('#testCam').click(); } };
-  const close = () => { stopTest(); modal.hidden = true; };
-  modal.querySelector('[data-close]').onclick = close;
-  $('#setSave').onclick = async () => {
-    const name = draft.name.trim();
-    if (!name) { $('#setError').textContent = 'Informe seu nome.'; return; }
-    const err = await A.saveProfile({ name, color: draft.color, avatar_url: draft.avatar_url });
-    if (err) $('#setError').textContent = err; else close();
-  };
-  fillDevices();
+  modal.querySelector('[data-close]').onclick = closeSettings;
+  modal.querySelectorAll('.set-nav .srv-tab').forEach((b) => (b.onclick = () => (b.dataset.tab === 'logout' ? A.logout() : showSetTab(b.dataset.tab))));
   modal.hidden = false;
+  showSetTab(tab);
 }
 
-async function fillDevices() {
-  try {
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    $('#spkField').hidden = !canPickSpeaker;
-    for (const [sel, kind, current] of [['#micSelect', 'audioinput', local.micDeviceId], ['#spkSelect', 'audiooutput', local.speakerDeviceId], ['#camSelect', 'videoinput', local.camDeviceId]]) {
-      const el = $(sel);
-      const list = devs.filter((d) => d.kind === kind);
-      el.innerHTML = '';
-      if (!list.length || !list[0].label) { el.append(h('option', { value: '' }, list.length ? 'Permita o acesso para listar' : 'Nenhum dispositivo')); continue; }
-      list.forEach((d, i) => el.append(h('option', { value: d.deviceId }, d.label || `Dispositivo ${i + 1}`)));
-      if (current && list.some((d) => d.deviceId === current)) el.value = current;
+function closeSettings() {
+  testStream?.getTracks().forEach((t) => t.stop()); testStream = null;
+  stopMeter();
+  $('#settingsModal').hidden = true;
+}
+
+function showSetTab(tab) {
+  setTab = tab;
+  stopMeter();
+  testStream?.getTracks().forEach((t) => t.stop()); testStream = null;
+  $('#settingsModal').querySelectorAll('.set-nav .srv-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#setHeading').textContent = { profile: 'Meu perfil', appearance: 'Aparência', voice: 'Voz e vídeo' }[tab];
+  $('#setError').textContent = '';
+  const box = $('#setContent');
+  box.innerHTML = '';
+  if (tab === 'profile') renderProfileTab(box);
+  else if (tab === 'appearance') renderAppearanceTab(box);
+  else renderVoiceTab(box);
+}
+
+// ---------------------------------------------------------------- Aba: Meu perfil
+function renderProfileTab(box) {
+  const me = myProfile();
+  const previewWrap = h('div', { class: 'set-preview-card' });
+  const refreshPreview = () => {
+    previewWrap.innerHTML = '';
+    previewWrap.append(profileCard({ ...me, ...draft, pronouns: draft.pronouns.trim(), bio: draft.bio.trim() }, state.presence.get(state.me)));
+  };
+
+  const upload = (label, w, hgt, key) => {
+    const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+    const btn = h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, label);
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { $('#setError').textContent = 'Use uma imagem JPG, PNG ou WebP.'; return; }
+      btn.textContent = 'Enviando…'; btn.disabled = true;
+      try {
+        const blob = await cropImage(file, w, hgt);
+        const { url, error } = await A.uploadPhoto(blob);
+        if (error) $('#setError').textContent = error; else { draft[key] = url; renderAll(); }
+      } catch { $('#setError').textContent = 'Não foi possível ler essa imagem.'; }
+      btn.textContent = label; btn.disabled = false;
+    };
+    return [btn, input];
+  };
+
+  const swatches = (key, list, { allowNone = false, noneLabel = 'Padrão' } = {}) => {
+    const row = h('div', { class: 'swatches' });
+    if (allowNone) row.append(h('button', { class: `btn${!draft[key] ? ' sel' : ''}`, type: 'button', style: 'padding:3px 10px;font-size:12px', onclick: () => { draft[key] = null; renderAll(); } }, noneLabel));
+    for (const c of list) row.append(h('button', { class: `sw${draft[key] === c ? ' sel' : ''}`, type: 'button', style: `background:${c}`, onclick: () => { draft[key] = c; renderAll(); } }));
+    const picker = h('input', { type: 'color', value: draft[key] || list[0], title: 'Outra cor', style: 'width:30px;height:26px;border:0;background:none;padding:0;cursor:pointer' });
+    picker.oninput = () => { draft[key] = picker.value; refreshPreview(); };
+    picker.onchange = () => renderAll();
+    row.append(picker);
+    return row;
+  };
+
+  const form = h('div', {});
+  const renderAll = () => {
+    form.innerHTML = '';
+    const [photoBtn, photoInput] = upload('Trocar avatar', 256, 256, 'avatar_url');
+    const [bannerBtn, bannerInput] = upload('Enviar imagem da faixa', 960, 384, 'banner_url');
+    const nameInput = h('input', { class: 'input', maxlength: 32, value: draft.name });
+    nameInput.oninput = () => { draft.name = nameInput.value; refreshPreview(); };
+    const pron = h('input', { class: 'input', maxlength: 40, value: draft.pronouns, placeholder: 'ele/dele, ela/dela…' });
+    pron.oninput = () => { draft.pronouns = pron.value; refreshPreview(); };
+    const bio = h('textarea', { class: 'input', maxlength: 190, placeholder: 'Conte um pouco sobre você (ex.: ⚙️ Fazendo a operação girar)' });
+    bio.value = draft.bio;
+    const counter = h('div', { class: 'counter' }, `${draft.bio.length}/190`);
+    bio.oninput = () => { draft.bio = bio.value; counter.textContent = `${bio.value.length}/190`; refreshPreview(); };
+    [nameInput, pron, bio].forEach((i) => i.addEventListener('keydown', (e) => e.stopPropagation()));
+    const decos = h('div', { class: 'deco-tiles' });
+    for (const [key, label] of Object.entries(DECORATIONS)) {
+      decos.append(h('button', { class: `deco-tile${draft.decoration === key ? ' sel' : ''}`, type: 'button', onclick: () => { draft.decoration = key; renderAll(); } },
+        avatarOf({ ...me, ...draft, decoration: key || null }, 'lg'), label));
     }
-  } catch {}
+    form.append(
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Nome exibido'), nameInput),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Cor do nome'), swatches('name_color', ['#f43f5e', '#f97316', '#fbbf24', '#22c55e', '#22d3ee', '#3b82f6', '#a855f7', '#ec4899', '#ffffff'], { allowNone: true, noneLabel: 'Cor do cargo' })),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Pronomes'), pron),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Avatar'), h('div', { class: 'row-gap' }, photoBtn, photoInput,
+        draft.avatar_url ? h('button', { class: 'btn danger-outline', type: 'button', onclick: () => { draft.avatar_url = null; renderAll(); } }, 'Remover foto') : null)),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Cor do avatar (sem foto)'), swatches('color', COLORS)),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Moldura do avatar'), decos),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Faixa do perfil'),
+        h('div', { class: 'row-gap' }, bannerBtn, bannerInput,
+          draft.banner_url ? h('button', { class: 'btn danger-outline', type: 'button', onclick: () => { draft.banner_url = null; renderAll(); } }, 'Remover imagem') : null),
+        h('div', { class: 'muted small', style: 'margin:10px 0 6px' }, 'Ou uma cor / gradiente:'),
+        swatches('banner_color', ['#b91c1c', '#c2410c', '#a16207', '#15803d', '#0e7490', '#1d4ed8', '#6d28d9', '#be185d', '#0b1426'], { allowNone: true, noneLabel: 'Cor do avatar' }),
+        h('div', { class: 'muted small', style: 'margin:10px 0 6px' }, 'Segunda cor (gradiente):'),
+        swatches('banner_color2', ['#f97316', '#facc15', '#22d3ee', '#a855f7', '#ec4899', '#22c55e', '#000000', '#ffffff'], { allowNone: true, noneLabel: 'Sem gradiente' })),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Sobre mim'), bio, counter),
+      h('div', { class: 'row-gap', style: 'justify-content:flex-end' },
+        h('button', { class: 'btn', type: 'button', onclick: closeSettings }, 'Cancelar'),
+        h('button', { class: 'btn primary', type: 'button', onclick: save }, 'Salvar alterações')));
+    refreshPreview();
+  };
+  const save = async () => {
+    const name = draft.name.trim();
+    if (!name) { $('#setError').textContent = 'Informe seu nome.'; return; }
+    const err = await A.saveProfile({ ...draft, name, pronouns: draft.pronouns.trim() || null, bio: draft.bio.trim() || null, decoration: draft.decoration || null });
+    if (err) $('#setError').textContent = err;
+    else { toast({ title: '✅ Perfil salvo', timeout: 2500 }); closeSettings(); }
+  };
+  renderAll();
+  box.append(h('div', { class: 'set-grid' }, form, h('div', {}, h('div', { class: 'muted small', style: 'margin-bottom:8px' }, 'PRÉVIA'), previewWrap)));
+}
+
+// ---------------------------------------------------------------- Aba: Aparência
+function renderAppearanceTab(box) {
+  const render = () => {
+    const prefs = getPrefs();
+    box.innerHTML = '';
+    const set = (patch) => { const next = { ...getPrefs(), ...patch }; applyPrefs(next); A.savePrefs(next); render(); };
+    const std = h('div', { class: 'theme-tiles labeled' });
+    for (const [key, t] of [...Object.entries(THEMES), ['sistema', { name: 'Sistema', swatch: 'linear-gradient(135deg,#ffffff 50%,#0b1426 50%)' }]]) {
+      std.append(h('button', { class: `theme-tile${!prefs.gradient && prefs.theme === key ? ' sel' : ''}`, style: `background:${t.swatch}`, title: t.name, onclick: () => set({ theme: key, gradient: null }) }, h('span', { class: 'tl' }, t.name)));
+    }
+    const grads = h('div', { class: 'theme-tiles labeled' });
+    for (const [key, g] of Object.entries(GRADIENTS)) {
+      grads.append(h('button', { class: `theme-tile${prefs.gradient === key ? ' sel' : ''}`, style: `background:${g.bg}`, title: g.name, onclick: () => set({ gradient: key }) }, h('span', { class: 'tl' }, g.name)));
+    }
+    const acc = h('div', { class: 'swatches' });
+    for (const c of ACCENTS) acc.append(h('button', { class: `sw${prefs.accent === c ? ' sel' : ''}`, style: `background:${c}`, onclick: () => set({ accent: c }) }));
+    const scale = h('input', { type: 'range', min: 0.85, max: 1.3, step: 0.05, value: prefs.fontScale, style: 'width:100%;accent-color:var(--accent)' });
+    const scaleLbl = h('span', { class: 'muted small' }, `${Math.round(prefs.fontScale * 100)}%`);
+    scale.oninput = () => { scaleLbl.textContent = `${Math.round(scale.value * 100)}%`; };
+    scale.onchange = () => set({ fontScale: Number(scale.value) });
+    box.append(
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Temas padrão'), std),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Temas coloridos ✨ liberados'), grads),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Cor de destaque'), acc),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Tamanho do texto e da interface'), h('div', { class: 'row-gap' }, scale, scaleLbl)),
+      h('p', { class: 'muted small' }, 'O tema fica salvo na sua conta e aparece igual em qualquer computador.'));
+  };
+  render();
+}
+
+// ---------------------------------------------------------------- Aba: Voz e vídeo
+function stopMeter() {
+  clearInterval(meterTimer); meterTimer = null;
+  meterStream?.getTracks().forEach((t) => t.stop()); meterStream = null;
+}
+
+async function renderVoiceTab(box) {
+  const micSel = h('select', { class: 'input' });
+  const spkSel = h('select', { class: 'input' });
+  const camSel = h('select', { class: 'input' });
+  const meter = h('div', { class: 'meter' }, h('i'));
+  const preview = h('div', { class: 'preview off' }, h('video', { autoplay: true, playsinline: true, muted: true }), h('div', { class: 'preview-off' }, 'Câmera desligada'));
+  preview.querySelector('video').muted = true;
+  const camBtn = h('button', { class: 'btn block', type: 'button' }, 'Testar câmera');
+  const audio = getAudioProcessing();
+  const q = getScreenQuality();
+
+  const qRes = h('div', { class: 'quality-grid' });
+  const qFps = h('div', { class: 'fps-grid' });
+  const paintQ = () => {
+    const cur = getScreenQuality();
+    qRes.innerHTML = ''; qFps.innerHTML = '';
+    for (const [k, v] of Object.entries(SCREEN_PRESETS)) qRes.append(h('button', { class: `btn${cur.res === k ? ' sel' : ''}`, type: 'button', onclick: () => { setScreenQuality({ res: k }); paintQ(); } }, v.label));
+    for (const f of [15, 30, 60]) qFps.append(h('button', { class: `btn${cur.fps === f ? ' sel' : ''}`, type: 'button', onclick: () => { setScreenQuality({ fps: f }); paintQ(); } }, `${f} fps`));
+  };
+  paintQ();
+
+  box.append(h('div', { class: 'set-grid' },
+    h('div', {},
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Microfone'), micSel, meter, h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Fale algo: a barra verde mostra o volume que chega no microfone.')),
+      h('div', { class: 'set-sec', hidden: !canPickSpeaker }, h('span', { class: 'lbl' }, 'Saída de áudio (fone / alto-falante)'), spkSel,
+        h('button', { class: 'btn', type: 'button', style: 'margin-top:8px', onclick: () => sounds.join() }, '🔊 Tocar som de teste')),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Processamento de voz'),
+        switchRow('Supressão de ruído', 'Corta barulho de fundo (teclado, ventilador, rua).', audio.noiseSuppression, (v) => setAudioProcessing({ noiseSuppression: v })),
+        switchRow('Cancelamento de eco', 'Evita que o som das caixas volte pelo microfone.', audio.echoCancellation, (v) => setAudioProcessing({ echoCancellation: v })),
+        switchRow('Ganho automático', 'Ajusta o volume da sua voz sozinho.', audio.autoGainControl, (v) => setAudioProcessing({ autoGainControl: v }))),
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Qualidade padrão ao transmitir a tela'), qRes, h('div', { style: 'height:8px' }), qFps,
+        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Tudo liberado, inclusive 4K 60 fps. Em salas com muita gente, 1080p costuma ficar mais fluido para todos.'))),
+    h('div', {},
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn))));
+
+  // listas de dispositivos
+  const fill = async () => {
+    const devs = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+    for (const [sel, kind, current] of [[micSel, 'audioinput', local.micDeviceId], [spkSel, 'audiooutput', local.speakerDeviceId], [camSel, 'videoinput', local.camDeviceId]]) {
+      const list = devs.filter((d) => d.kind === kind);
+      sel.innerHTML = '';
+      if (!list.length) { sel.append(h('option', { value: '' }, 'Nenhum dispositivo')); continue; }
+      list.forEach((d, i) => sel.append(h('option', { value: d.deviceId }, d.label || `Dispositivo ${i + 1}`)));
+      if (current && list.some((d) => d.deviceId === current)) sel.value = current;
+    }
+  };
+  const startMeter = async () => {
+    stopMeter();
+    try {
+      meterStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: local.micDeviceId ? { exact: local.micDeviceId } : undefined, ...getAudioProcessing() } });
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(meterStream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      meterTimer = setInterval(() => {
+        if (!meterStream) { ctx.close(); return; }
+        an.getByteTimeDomainData(buf);
+        let sum = 0; for (const v of buf) { const x = (v - 128) / 128; sum += x * x; }
+        meter.firstChild.style.width = `${Math.min(100, Math.sqrt(sum / buf.length) * 400)}%`;
+      }, 60);
+    } catch { meter.firstChild.style.width = '0'; }
+    fill();
+  };
+  micSel.onchange = async () => { await switchDevice('mic', micSel.value); startMeter(); };
+  spkSel.onchange = () => { setSpeaker(spkSel.value); sounds.message(); };
+  camSel.onchange = async () => { await switchDevice('cam', camSel.value); if (testStream) { camBtn.click(); camBtn.click(); } };
+  camBtn.onclick = async () => {
+    if (testStream) { testStream.getTracks().forEach((t) => t.stop()); testStream = null; preview.querySelector('video').srcObject = null; preview.classList.add('off'); camBtn.textContent = 'Testar câmera'; return; }
+    try {
+      testStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: local.camDeviceId ? { exact: local.camDeviceId } : undefined, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+      preview.querySelector('video').srcObject = testStream;
+      preview.classList.remove('off');
+      camBtn.textContent = 'Parar teste';
+      fill();
+    } catch { $('#setError').textContent = 'Não foi possível acessar a câmera.'; }
+  };
+  on('audio-processing', () => { if (setTab === 'voice' && meterStream) startMeter(); });
+  await fill();
+  startMeter();
+}
+
+// ---------------------------------------------------------------- Menu de transmissão de tela
+export function openScreenMenu(anchor) {
+  showPopover(anchor, (el) => {
+    const q = { ...getScreenQuality() };
+    el.append(h('div', { class: 'menu-label' }, 'Qualidade da transmissão'));
+    const res = h('div', { class: 'quality-grid', style: 'padding:0 6px' });
+    const fps = h('div', { class: 'fps-grid', style: 'padding:6px 6px 0' });
+    const paint = () => {
+      res.innerHTML = ''; fps.innerHTML = '';
+      for (const [k, v] of Object.entries(SCREEN_PRESETS)) res.append(h('button', { class: `btn${q.res === k ? ' sel' : ''}`, onclick: () => { q.res = k; paint(); } }, v.label));
+      for (const f of [15, 30, 60]) fps.append(h('button', { class: `btn${q.fps === f ? ' sel' : ''}`, onclick: () => { q.fps = f; paint(); } }, `${f} fps`));
+    };
+    paint();
+    const withAudio = h('input', { type: 'checkbox', checked: q.audio !== false });
+    el.append(res, fps,
+      h('label', { class: 'pop-row', style: 'display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer' }, withAudio, 'Transmitir o som também (aba ou sistema)'),
+      h('div', { class: 'pop-row' }, h('button', { class: 'btn primary block', onclick: () => { q.audio = withAudio.checked; setScreenQuality(q); closePopover(); A.startScreen(q); } }, '🖥️ Escolher tela e transmitir')),
+      h('div', { class: 'pop-row muted small' }, 'Dica: para mandar o som de um vídeo, escolha uma aba do Chrome e marque "Compartilhar áudio".'));
+  }, 'above');
 }
 
 // ------------------------------------------------------------------ Mover / banir

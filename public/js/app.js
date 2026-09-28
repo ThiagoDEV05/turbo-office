@@ -5,6 +5,10 @@ import { startNet, setMeta, getMeta, sendTo, stopNet } from './net.js';
 import * as rtc from './rtc.js';
 import * as ui from './ui.js';
 import * as chat from './chat.js';
+import { applyPrefs, loadLocalPrefs, getPrefs } from './prefs.js';
+
+// Aplica o tema salvo no navegador antes de qualquer coisa (sem piscar)
+applyPrefs(loadLocalPrefs());
 
 const { $ } = ui;
 let sb = null;
@@ -54,7 +58,7 @@ async function fetchUnknownProfiles() {
   const missing = [...state.presence.keys()].filter((id) => !state.profiles.has(id));
   if (!missing.length || fetchingProfiles) return;
   fetchingProfiles = true;
-  const { data } = await sb.from('profiles').select('id, email, name, color, role, avatar_url').in('id', missing);
+  const { data } = await sb.from('profiles').select('id, email, name, color, role, avatar_url, bio, pronouns, banner_color, banner_color2, banner_url, name_color, decoration, created_at').in('id', missing);
   fetchingProfiles = false;
   for (const p of data || []) state.profiles.set(p.id, p);
   if (data?.length) { renderAll(); emit('tiles'); }
@@ -145,6 +149,7 @@ function leaveVoice(silent = false) {
 
 // Sons de entrada/saída de outras pessoas na minha sala
 let prevRoomMembers = new Set();
+let savePrefsTimer = null;
 function checkRoomSounds() {
   if (!state.voiceRoom) { prevRoomMembers = new Set(); return; }
   const cur = new Set(membersIn(state.voiceRoom).filter((id) => id !== state.me));
@@ -228,21 +233,31 @@ const actions = {
     if (error) return { error: errMsg(error) };
     return { url: sb.storage.from('avatars').getPublicUrl(path).data.publicUrl };
   },
-  async saveProfile({ name, color, avatar_url }) {
-    const before = myProfile().avatar_url;
-    const { error } = await sb.from('profiles').update({ name, color, avatar_url }).eq('id', state.me);
-    if (error) return errMsg(error);
-    state.profiles.set(state.me, { ...myProfile(), name, color, avatar_url });
+  async saveProfile(fields) {
+    const allowed = ['name', 'color', 'avatar_url', 'banner_url', 'banner_color', 'banner_color2', 'name_color', 'pronouns', 'bio', 'decoration'];
+    const patch = Object.fromEntries(allowed.filter((k) => k in fields).map((k) => [k, fields[k] === '' ? null : fields[k]]));
+    const { error } = await sb.from('profiles').update(patch).eq('id', state.me);
+    if (error) return /check constraint/i.test(error.message) ? 'Algum campo ficou fora do formato (bio até 190 caracteres, pronomes até 40).' : errMsg(error);
+    const me = { ...myProfile(), ...patch };
+    state.profiles.set(state.me, me);
     renderAll();
     emit('tiles');
-    // Apaga fotos antigas que ficaram na pasta
-    if (before !== avatar_url) {
-      const { data: files } = await sb.storage.from('avatars').list(state.me);
-      const keep = avatar_url?.split('/').pop();
-      const old = (files || []).map((f) => f.name).filter((n) => n !== keep).map((n) => `${state.me}/${n}`);
-      if (old.length) sb.storage.from('avatars').remove(old);
-    }
+    // Apaga imagens antigas (mantém só a foto e a faixa atuais)
+    const keep = new Set([me.avatar_url, me.banner_url].filter(Boolean).map((u) => u.split('/').pop()));
+    const { data: files } = await sb.storage.from('avatars').list(state.me);
+    const old = (files || []).map((f) => f.name).filter((n) => !keep.has(n)).map((n) => `${state.me}/${n}`);
+    if (old.length) sb.storage.from('avatars').remove(old);
     return null;
+  },
+  savePrefs(prefs) {
+    clearTimeout(savePrefsTimer);
+    savePrefsTimer = setTimeout(() => sb.from('profiles').update({ prefs }).eq('id', state.me).then(() => {}), 600);
+  },
+  async startScreen(q) {
+    if (!state.voiceRoom) return ui.toast({ title: 'Entre numa sala primeiro', body: 'A transmissão vai para quem está na sua sala de voz.' });
+    const ok = await rtc.toggleScreen(q);
+    if (ok) ui.toast({ title: '🖥️ Transmitindo sua tela', body: `${rtc.SCREEN_PRESETS[q.res]?.label || ''} · ${q.fps} fps${rtc.local.screenAudio ? ' · com som' : ''}`, timeout: 3000 });
+    ui.renderControls();
   },
   async moveTo(id, roomId) {
     const { error } = await sb.from('mod_actions').insert({ target: id, action: 'move', room_id: roomId });
@@ -294,7 +309,10 @@ function bindEvents() {
     const row = p.new;
     if (!row?.id) return;
     const old = state.profiles.get(row.id);
-    state.profiles.set(row.id, { id: row.id, email: row.email, name: row.name, color: row.color, role: row.role, avatar_url: row.avatar_url });
+    const { prefs, ...pub } = row;
+    state.profiles.set(row.id, pub);
+    // Tema alterado em outro dispositivo: sincroniza
+    if (row.id === state.me && prefs && Object.keys(prefs).length && JSON.stringify(prefs) !== JSON.stringify(getPrefs())) applyPrefs(prefs);
     if (row.id === state.me && old && old.role !== row.role) {
       ui.toast({ title: `Seu cargo agora é ${ROLES[row.role].label}` });
       loadRooms();
@@ -344,7 +362,11 @@ function bindEvents() {
   $('#micBtn').onclick = $('#cMic').onclick = toggleMic;
   $('#deafBtn').onclick = $('#cDeaf').onclick = toggleDeaf;
   $('#cCam').onclick = toggleCam;
-  $('#cScreen').onclick = async () => { await rtc.toggleScreen(); ui.renderControls(); };
+  $('#cScreen').onclick = async (e) => {
+    if (rtc.local.screen) { await rtc.toggleScreen(); ui.renderControls(); return; }
+    e.stopPropagation();
+    ui.openScreenMenu(e.currentTarget);
+  };
   $('#cLeave').onclick = $('#vpLeave').onclick = () => leaveVoice();
   $('#lobbyJoin').onclick = () => state.view?.type === 'voice' && joinVoice(state.view.id);
   $('#settingsBtn').onclick = () => ui.openSettings();
@@ -404,9 +426,12 @@ async function boot() {
   document.title = state.cfg.serverName ? `${state.cfg.serverName} · Turbo Office` : 'Turbo Office';
   sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') location.replace('/login'); });
 
-  const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role, avatar_url');
+  const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role, avatar_url, bio, pronouns, banner_color, banner_color2, banner_url, name_color, decoration, created_at');
   if (error) return fail(`Banco não configurado (${error.message}). Rode supabase/schema.sql no Supabase.`);
   state.profiles = new Map(profiles.map((p) => [p.id, p]));
+  const { data: mine } = await sb.from('profiles').select('prefs').eq('id', state.me).maybeSingle();
+  if (mine?.prefs && Object.keys(mine.prefs).length) applyPrefs(mine.prefs);
+  else actions.savePrefs(getPrefs());
   if (!state.profiles.has(state.me)) {
     return fail('Seu perfil não foi encontrado. Se a conta foi criada antes do schema.sql, apague o usuário no Supabase (Authentication → Users) e cadastre de novo.');
   }
@@ -439,4 +464,4 @@ async function boot() {
 boot();
 
 // Exposto para testes/depuração no console
-window.turbo = { state, rank };
+window.turbo = { state, rank, rtc };
