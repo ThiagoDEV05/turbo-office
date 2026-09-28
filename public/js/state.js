@@ -4,7 +4,8 @@ export const state = {
   cfg: null,
   me: null,               // uuid do usuário local
   profiles: new Map(),    // id -> { id, email, name, color, role }
-  rooms: new Map(),       // id -> { id, name, kind, min_role, write_role, position }
+  categories: new Map(),  // id -> { id, name, position, min_role }
+  rooms: new Map(),       // id -> { id, name, kind, category_id, min_role, write_role, position }
   presence: new Map(),    // id -> { room, media: {mic,cam,screen}, deaf, status, statusText }
   voiceRoom: null,        // id da sala de voz em que estou
   view: null,             // { type: 'text'|'voice'|'dm', id }

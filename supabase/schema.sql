@@ -21,6 +21,11 @@ language sql immutable as $$
   select case r when 'admin' then 3 when 'gestor' then 2 when 'membro' then 1 else 0 end
 $$;
 
+create or replace function public.greatest_role(a text, b text) returns text
+language sql immutable as $$
+  select case when role_rank(a) >= role_rank(b) then a else b end
+$$;
+
 create or replace function public.my_rank() returns int
 language sql stable security definer set search_path = public as $$
   select coalesce((select role_rank(role) from profiles where id = auth.uid()), 0)
@@ -89,19 +94,49 @@ drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
   using (id = auth.uid() or my_rank() = 3) with check (id = auth.uid() or my_rank() = 3);
 
+-- ---------------------------------------------------------------- Categorias
+-- Agrupam as salas (ex.: "👑 10 · LIDERANÇA"). min_role: cargo mínimo para ver a categoria.
+create table if not exists public.categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(name) between 1 and 60),
+  position int not null default 0,
+  min_role text not null default 'membro' check (min_role in ('admin', 'gestor', 'membro')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.categories enable row level security;
+drop policy if exists categories_read on public.categories;
+create policy categories_read on public.categories for select to authenticated
+  using (my_rank() >= role_rank(min_role));
+drop policy if exists categories_insert on public.categories;
+create policy categories_insert on public.categories for insert to authenticated
+  with check (my_rank() >= 2 and role_rank(min_role) <= my_rank());
+drop policy if exists categories_update on public.categories;
+create policy categories_update on public.categories for update to authenticated
+  using (my_rank() >= 2 and my_rank() >= role_rank(min_role))
+  with check (my_rank() >= 2 and role_rank(min_role) <= my_rank());
+drop policy if exists categories_delete on public.categories;
+create policy categories_delete on public.categories for delete to authenticated
+  using (my_rank() >= 2 and my_rank() >= role_rank(min_role));
+
 -- ---------------------------------------------------------------- Salas
 -- kind: 'text' (canal de texto) ou 'voice' (sala de voz/vídeo)
 -- min_role: cargo mínimo para ver/entrar · write_role: cargo mínimo para escrever (texto)
 create table if not exists public.rooms (
   id uuid primary key default gen_random_uuid(),
-  name text not null check (char_length(name) between 1 and 40),
+  name text not null check (char_length(name) between 1 and 60),
   kind text not null check (kind in ('text', 'voice')),
+  category_id uuid references public.categories(id) on delete set null,
   min_role text not null default 'membro' check (min_role in ('admin', 'gestor', 'membro')),
   write_role text not null default 'membro' check (write_role in ('admin', 'gestor', 'membro')),
   position int not null default 0,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Para bancos criados com a versão anterior deste arquivo
+alter table public.rooms add column if not exists category_id uuid references public.categories(id) on delete set null;
+alter table public.rooms drop constraint if exists rooms_name_check;
+alter table public.rooms add constraint rooms_name_check check (char_length(name) between 1 and 60);
 
 alter table public.rooms enable row level security;
 drop policy if exists rooms_read on public.rooms;
@@ -118,21 +153,53 @@ drop policy if exists rooms_delete on public.rooms;
 create policy rooms_delete on public.rooms for delete to authenticated
   using (my_rank() >= 2 and my_rank() >= role_rank(min_role));
 
-insert into public.rooms (name, kind, position, min_role, write_role)
-select * from (values
-  ('geral', 'text', 0, 'membro', 'membro'),
-  ('avisos', 'text', 1, 'membro', 'gestor'),
-  ('random', 'text', 2, 'membro', 'membro'),
-  ('Lounge', 'voice', 10, 'membro', 'membro'),
-  ('Tráfego', 'voice', 11, 'membro', 'membro'),
-  ('Criativo', 'voice', 12, 'membro', 'membro'),
-  ('CS', 'voice', 13, 'membro', 'membro'),
-  ('Comercial', 'voice', 14, 'membro', 'membro'),
-  ('Reunião 1', 'voice', 15, 'membro', 'membro'),
-  ('Reunião 2', 'voice', 16, 'membro', 'membro'),
-  ('Diretoria', 'voice', 17, 'gestor', 'gestor')
-) as v(name, kind, position, min_role, write_role)
-where not exists (select 1 from public.rooms);
+-- ---------------------------------------------------------------- Estrutura inicial
+-- Espelha o servidor "Performance Turbo". Só roda quando ainda não há categorias;
+-- remove as salas-padrão de versões anteriores (as criadas por pessoas são mantidas).
+-- Texto: ["nome", "cargo mínimo para escrever"] · Voz: "nome"
+do $$
+declare
+  spec jsonb := $json$[
+    {"name": "Canais de Texto", "role": "membro"},
+    {"name": "Só os ADMs BB! 😜", "role": "admin", "voice": ["🧠 | 1v1"]},
+    {"name": "⚙️ 00 · ADMINISTRAÇÃO", "role": "membro",
+     "text": [["🔔・avisos", "gestor"], ["📁・materiais", "membro"], ["😂・memes", "membro"], ["💬・chat-geral", "membro"]]},
+    {"name": "👑 10 · LIDERANÇA", "role": "membro",
+     "voice": ["[LD] Rodrigo Padrão", "[LD] Glauber", "[LD] Ismael", "[LD] Alex", "[LD] Maria"]},
+    {"name": "💼 20 · ACCOUNTS", "role": "membro",
+     "voice": ["[AC] Victor Arpini", "[AC] Jonatas Cavalcante", "[AC] Renan Fortunato", "[AC] Aline Souza", "[AC] Gabriel Taufner", "[AC] Felipe Vassalo"]},
+    {"name": "📊 30 · GESTORES", "role": "membro",
+     "voice": ["[GT] Thiago Andrey", "[GT] Arthur Magno", "[GT] Thiago Martins", "[GT] Allan Eduardo", "[GT] Richard Meira", "[GT] Weverton Teto", "[GT] Gabriel Magno", "[GT] Bruna Teixeira", "[GT] Bruno Silva", "[GT] José Neto", "[GT] Matheus Alves", "[GT] Matheus Silva", "[GT] Bruno Cosendey"]},
+    {"name": "📈 40 · GROWTH TURBO", "role": "membro",
+     "voice": ["[GW] Lucas Pereira", "[GW] Ichino", "[GW] Caio Malini", "[GW] Esther", "[GW] Amanda", "[GW] Caramelo"]},
+    {"name": "🎨 50 · DESIGN", "role": "membro",
+     "voice": ["[DG] Bernardo Soroldani", "[DG] Leonardo Soares", "[DG] Wendel Azevedo", "[DG] João Lucas Negromonte", "[DG] Lucas Dallas", "[DG] Carlos Eduardo"]},
+    {"name": "🔫 60 · CX/CS", "role": "membro"}
+  ]$json$;
+  cat jsonb;
+  t jsonb;
+  v text;
+  cid uuid;
+  i int := 0;
+  j int;
+begin
+  if exists (select 1 from public.categories) then return; end if;
+  delete from public.rooms where created_by is null;
+  for cat in select * from jsonb_array_elements(spec) loop
+    insert into public.categories (name, position, min_role) values (cat->>'name', i, cat->>'role') returning id into cid;
+    j := 0;
+    for t in select * from jsonb_array_elements(coalesce(cat->'text', '[]'::jsonb)) loop
+      insert into public.rooms (name, kind, category_id, position, min_role, write_role)
+        values (t->>0, 'text', cid, j, cat->>'role', public.greatest_role(cat->>'role', t->>1));
+      j := j + 1;
+    end loop;
+    for v in select * from jsonb_array_elements_text(coalesce(cat->'voice', '[]'::jsonb)) loop
+      insert into public.rooms (name, kind, category_id, position, min_role) values (v, 'voice', cid, j, cat->>'role');
+      j := j + 1;
+    end loop;
+    i := i + 1;
+  end loop;
+end $$;
 
 -- ---------------------------------------------------------------- Mensagens
 -- channel: 'room:<uuid da sala de texto>' ou 'dm:<uuid menor>:<uuid maior>'
@@ -203,7 +270,7 @@ create policy mod_insert on public.mod_actions for insert to authenticated
 do $$
 declare t text;
 begin
-  foreach t in array array['profiles', 'rooms', 'messages', 'mod_actions'] loop
+  foreach t in array array['profiles', 'categories', 'rooms', 'messages', 'mod_actions'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;

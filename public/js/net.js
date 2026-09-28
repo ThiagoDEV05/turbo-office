@@ -36,7 +36,7 @@ export async function startNet(client) {
   inbox.subscribe((status) => { if (status === 'SUBSCRIBED') inbox.httpSend('kick', { sid }).catch(() => {}); });
 
   dbch = sb.channel('turbo:db', { config: { private: true } });
-  for (const table of ['messages', 'rooms', 'profiles']) {
+  for (const table of ['messages', 'categories', 'rooms', 'profiles']) {
     dbch.on('postgres_changes', { event: '*', schema: 'public', table }, (p) => emit(`db:${table}`, p));
   }
   dbch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mod_actions', filter: `target=eq.${state.me}` }, (p) => emit('db:mod', p.new));

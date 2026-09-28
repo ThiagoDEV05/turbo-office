@@ -29,6 +29,7 @@ export const icons = {
   headOff: svg('<path d="M3 14v-2a9 9 0 0 1 14.5-7.1M21 12v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/><path d="M3 3l18 18"/>'),
   leave: svg('<path d="M10.7 13.3a13 13 0 0 1-2.4-3.3l1.5-1.5a1 1 0 0 0 .2-1.1L8.6 4.6A1 1 0 0 0 7.5 4H4a1 1 0 0 0-1 1 17 17 0 0 0 4.9 11.1M13.3 10.7M22 2L2 22M17.1 16.1l1.3-1.3a1 1 0 0 1 1.1-.2l2.8 1.3a1 1 0 0 1 .6 1V20a1 1 0 0 1-1 1 17 17 0 0 1-8.4-2.3"/>'),
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  speaker: svg('<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>'),
   people: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>'),
 };
 
@@ -47,50 +48,79 @@ export function avatar(id, size = '', withStatus = false) {
 }
 
 // ------------------------------------------------------------------ Lista de canais
-const roomsOf = (kind) => [...state.rooms.values()].filter((r) => r.kind === kind).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+// Dentro de cada categoria: canais de texto primeiro, depois salas de voz (como no Discord).
+const byPos = (a, b) => (a.kind === b.kind ? 0 : a.kind === 'text' ? -1 : 1) || a.position - b.position || a.name.localeCompare(b.name);
 const isActive = (type, id) => state.view?.type === type && state.view.id === id;
+const viewType = (r) => (r.kind === 'text' ? 'text' : 'voice');
+
+let collapsed = new Set();
+try { collapsed = new Set(JSON.parse(localStorage.getItem('to.collapsed') || '[]')); } catch {}
+let lastUnreadOf = () => 0;
+function toggleCollapsed(id) {
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  try { localStorage.setItem('to.collapsed', JSON.stringify([...collapsed])); } catch {}
+  renderChannels(lastUnreadOf);
+}
+
+function roomEntry(r, unreadOf) {
+  const manage = canManageRooms() && myRank() >= rank(r.min_role);
+  const lock = r.min_role !== 'membro' ? h('span', { class: 'lock', title: `Só ${ROLES[r.min_role].label}+` }, '🔒') : null;
+  const edit = manage ? h('span', { class: 'edit', title: 'Editar', onclick: (e) => { e.stopPropagation(); openRoomModal(r); } }, '⚙') : null;
+  if (r.kind === 'text') {
+    const unread = unreadOf(`room:${r.id}`);
+    return [h('button', { class: `chan${isActive('text', r.id) ? ' active' : ''}${unread ? ' unread' : ''}`, onclick: () => A.selectView({ type: 'text', id: r.id }) },
+      h('span', { class: 'ico hash' }, '#'), h('span', { class: 'nm' }, r.name), lock,
+      unread ? h('span', { class: 'badge' }, unread > 99 ? '99+' : String(unread)) : null, edit)];
+  }
+  const inside = membersIn(r.id);
+  const here = state.voiceRoom === r.id;
+  const btn = h('button', { class: `chan voice${isActive('voice', r.id) ? ' active' : ''}${here ? ' here' : ''}`, onclick: () => A.joinVoice(r.id), title: here ? 'Você está nesta sala' : 'Entrar na sala' },
+    h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, edit);
+  btn.querySelector('.ico').innerHTML = icons.speaker;
+  const out = [btn];
+  if (inside.length) {
+    const list = h('div', { class: 'voice-members' });
+    for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
+      const p = state.presence.get(id);
+      const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
+      list.append(h('div', { class: 'vm', onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
+    }
+    out.push(list);
+  }
+  return out;
+}
 
 export function renderChannels(unreadOf) {
+  lastUnreadOf = unreadOf;
   const nav = $('#channelList');
   const scroll = nav.scrollTop;
   nav.innerHTML = '';
   const manage = canManageRooms();
-  const lockIcon = (r) => (r.min_role !== 'membro' ? h('span', { class: 'lock', title: `Só ${ROLES[r.min_role].label}+` }, '🔒') : null);
-  const editBtn = (r) => (manage && myRank() >= rank(r.min_role)
-    ? h('span', { class: 'edit', title: 'Editar sala', onclick: (e) => { e.stopPropagation(); openRoomModal(r); } }, '⚙')
-    : null);
+  const rooms = [...state.rooms.values()];
+  const cats = [...state.categories.values()].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
 
-  nav.append(h('div', { class: 'sec-head' }, 'Canais de texto', manage ? h('button', { class: 'icon-btn', title: 'Criar canal', onclick: () => openRoomModal(null, 'text') }, '+') : null));
-  for (const r of roomsOf('text')) {
-    const unread = unreadOf(`room:${r.id}`);
-    nav.append(h('button', { class: `chan${isActive('text', r.id) ? ' active' : ''}${unread ? ' unread' : ''}`, onclick: () => A.selectView({ type: 'text', id: r.id }) },
-      h('span', { class: 'ico' }, '#'), h('span', { class: 'nm' }, r.name), lockIcon(r),
-      unread ? h('span', { class: 'badge' }, unread > 99 ? '99+' : String(unread)) : null, editBtn(r)));
+  for (const r of rooms.filter((r) => !r.category_id || !state.categories.has(r.category_id)).sort(byPos)) nav.append(...roomEntry(r, unreadOf));
+
+  for (const c of cats) {
+    const list = rooms.filter((r) => r.category_id === c.id).sort(byPos);
+    const isCollapsed = collapsed.has(c.id);
+    const unreadInside = list.some((r) => r.kind === 'text' && unreadOf(`room:${r.id}`));
+    nav.append(h('div', { class: `cat${isCollapsed ? ' collapsed' : ''}` },
+      h('button', { class: 'cat-toggle', onclick: () => toggleCollapsed(c.id), title: isCollapsed ? 'Expandir' : 'Recolher' },
+        h('span', { class: 'cat-name' }, c.name), h('span', { class: 'chev' }, '›'), isCollapsed && unreadInside ? h('span', { class: 'cat-dot' }) : null),
+      manage && myRank() >= rank(c.min_role) ? h('button', { class: 'icon-btn cat-edit', title: 'Editar categoria', onclick: () => openCategoryModal(c) }, '⚙') : null,
+      manage && myRank() >= rank(c.min_role) ? h('button', { class: 'icon-btn cat-add', title: 'Criar sala nesta categoria', onclick: () => openRoomModal(null, 'voice', c.id) }, '+') : null));
+    // Recolhida: continua mostrando a sala aberta, a sala onde estou e salas com gente
+    const visible = isCollapsed
+      ? list.filter((r) => isActive(viewType(r), r.id) || state.voiceRoom === r.id || membersIn(r.id).length)
+      : list;
+    for (const r of visible) nav.append(...roomEntry(r, unreadOf));
   }
+  if (manage) nav.append(h('button', { class: 'add-cat', onclick: () => openCategoryModal(null) }, '+ Criar categoria'));
 
-  nav.append(h('div', { class: 'sec-head' }, 'Salas de voz', manage ? h('button', { class: 'icon-btn', title: 'Criar sala', onclick: () => openRoomModal(null, 'voice') }, '+') : null));
-  for (const r of roomsOf('voice')) {
-    const inside = membersIn(r.id);
-    nav.append(h('button', {
-      class: `chan${isActive('voice', r.id) ? ' active' : ''}`,
-      onclick: () => A.joinVoice(r.id),
-      title: state.voiceRoom === r.id ? 'Você está nesta sala' : 'Entrar na sala',
-    }, h('span', { class: 'ico' }, state.voiceRoom === r.id ? '🔊' : '🔈'), h('span', { class: 'nm' }, r.name), lockIcon(r),
-    inside.length ? h('span', { class: 'muted small' }, String(inside.length)) : null, editBtn(r)));
-    if (inside.length) {
-      const list = h('div', { class: 'voice-members' });
-      for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
-        const p = state.presence.get(id);
-        const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
-        list.append(h('div', { class: 'vm', onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
-      }
-      nav.append(list);
-    }
-  }
-
-  const dms = [...new Set([...(A.dmChannels?.() || [])])];
+  const dms = A.dmChannels?.() || [];
   if (dms.length) {
-    nav.append(h('div', { class: 'sec-head' }, 'Mensagens diretas'));
+    nav.append(h('div', { class: 'cat static' }, h('span', { class: 'cat-name' }, 'Mensagens diretas')));
     for (const key of dms) {
       const other = dmOther(key);
       if (!state.profiles.has(other)) continue;
@@ -343,30 +373,69 @@ function roleOptions(select, current) {
   }
 }
 
-export function openRoomModal(room, kind = 'voice') {
+export function openRoomModal(room, kind = 'voice', categoryId = null) {
   const modal = $('#roomModal');
   const f = $('#roomForm');
   $('#roomModalTitle').textContent = room ? `Editar ${room.kind === 'text' ? 'canal' : 'sala'}` : 'Criar sala';
   f.kind.value = room?.kind || kind;
   f.kind.disabled = !!room;
   f.name.value = room?.name || '';
-  roleOptions(f.min_role, room?.min_role || 'membro');
+  const cat = f.category_id;
+  cat.innerHTML = '';
+  cat.append(h('option', { value: '' }, 'Sem categoria'));
+  for (const c of [...state.categories.values()].sort((a, b) => a.position - b.position)) {
+    if (myRank() >= rank(c.min_role)) cat.append(h('option', { value: c.id }, c.name));
+  }
+  cat.value = room ? room.category_id || '' : categoryId || '';
+  const catRole = () => state.categories.get(cat.value)?.min_role || 'membro';
+  roleOptions(f.min_role, room?.min_role || catRole());
   roleOptions(f.write_role, room?.write_role || 'membro');
+  cat.onchange = () => { if (!room) roleOptions(f.min_role, catRole()); };
   const syncKind = () => ($('#writeRoleField').hidden = f.kind.value !== 'text');
   f.kind.onchange = syncKind; syncKind();
   $('#roomError').textContent = '';
   $('#roomDelete').hidden = !room;
   $('#roomDelete').onclick = async () => {
-    if (!confirm(`Excluir "${room.name}"? ${room.kind === 'text' ? 'As mensagens deixam de aparecer.' : ''}`)) return;
+    if (!confirm(`Excluir "${room.name}"?${room.kind === 'text' ? ' As mensagens deixam de aparecer.' : ''}`)) return;
     const err = await A.deleteRoom(room.id);
     if (err) $('#roomError').textContent = err; else modal.hidden = true;
   };
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const data = { name: f.name.value.trim(), min_role: f.min_role.value, write_role: f.kind.value === 'text' ? f.write_role.value : 'membro' };
+    const data = {
+      name: f.name.value.trim(),
+      category_id: cat.value || null,
+      min_role: f.min_role.value,
+      write_role: f.kind.value === 'text' ? f.write_role.value : 'membro',
+    };
     if (!data.name) return;
     const err = room ? await A.updateRoom(room.id, data) : await A.createRoom({ ...data, kind: f.kind.value });
     if (err) $('#roomError').textContent = err; else modal.hidden = true;
+  };
+  modal.hidden = false;
+  f.name.focus();
+}
+
+// ------------------------------------------------------------------ Modal: categoria
+export function openCategoryModal(cat) {
+  const modal = $('#catModal');
+  const f = $('#catForm');
+  $('#catModalTitle').textContent = cat ? 'Editar categoria' : 'Criar categoria';
+  f.name.value = cat?.name || '';
+  roleOptions(f.min_role, cat?.min_role || 'membro');
+  $('#catError').textContent = '';
+  $('#catDelete').hidden = !cat;
+  $('#catDelete').onclick = async () => {
+    if (!confirm(`Excluir a categoria "${cat.name}"? As salas dela ficam sem categoria (não são apagadas).`)) return;
+    const err = await A.deleteCategory(cat.id);
+    if (err) $('#catError').textContent = err; else modal.hidden = true;
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = { name: f.name.value.trim(), min_role: f.min_role.value };
+    if (!data.name) return;
+    const err = cat ? await A.updateCategory(cat.id, data) : await A.createCategory(data);
+    if (err) $('#catError').textContent = err; else modal.hidden = true;
   };
   modal.hidden = false;
   f.name.focus();
@@ -465,4 +534,4 @@ document.addEventListener('pointerdown', (e) => {
 document.querySelectorAll('.modal').forEach((m) => m.addEventListener('pointerdown', (e) => {
   if (e.target === m && m.id !== 'kicked') { if (m.id === 'settingsModal') m.querySelector('[data-close]').click(); else m.hidden = true; }
 }));
-document.querySelectorAll('#roomModal [data-close]').forEach((b) => (b.onclick = () => ($('#roomModal').hidden = true)));
+document.querySelectorAll('#roomModal [data-close], #catModal [data-close]').forEach((b) => (b.onclick = () => (b.closest('.modal').hidden = true)));

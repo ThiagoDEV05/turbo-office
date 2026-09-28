@@ -15,7 +15,7 @@
     <aside id="left">
       <header class="server-head">
         <img src="/favicon.svg" alt="" width="26" height="26">
-        <span class="server-name">Turbo Partners</span>
+        <span class="server-name" id="serverName">Turbo Office</span>
         <button class="icon-btn" id="adminBtn" title="Membros e cargos" hidden>⚙</button>
       </header>
       <nav id="channelList" class="scroll"></nav>
@@ -101,12 +101,29 @@
       <label class="field"><span>Tipo</span>
         <select class="input" name="kind"><option value="voice">🔊 Sala de voz/vídeo</option><option value="text"># Canal de texto</option></select>
       </label>
-      <label class="field"><span>Nome</span><input class="input" name="name" maxlength="40" required></label>
+      <label class="field"><span>Nome</span><input class="input" name="name" maxlength="60" required placeholder="[GT] Nome Sobrenome"></label>
+      <label class="field"><span>Categoria</span><select class="input" name="category_id"></select></label>
       <label class="field"><span>Quem pode ver e entrar</span><select class="input" name="min_role"></select></label>
       <label class="field" id="writeRoleField"><span>Quem pode escrever</span><select class="input" name="write_role"></select></label>
       <p class="error" id="roomError"></p>
       <div class="modal-actions">
         <button type="button" class="btn danger-outline" id="roomDelete" hidden>Excluir</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Cancelar</button>
+        <button type="submit" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Criar/editar categoria -->
+  <div id="catModal" class="modal" hidden>
+    <form class="modal-card narrow" id="catForm">
+      <h2 id="catModalTitle">Criar categoria</h2>
+      <label class="field"><span>Nome</span><input class="input" name="name" maxlength="60" required placeholder="📊 30 · GESTORES"></label>
+      <label class="field"><span>Quem pode ver</span><select class="input" name="min_role"></select></label>
+      <p class="error" id="catError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn danger-outline" id="catDelete" hidden>Excluir</button>
         <span class="spacer"></span>
         <button type="button" class="btn" data-close>Cancelar</button>
         <button type="submit" class="btn primary">Salvar</button>

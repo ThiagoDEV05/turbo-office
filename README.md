@@ -6,7 +6,8 @@ Salas de voz e vídeo, canais de texto e cargos para o time da Turbo Partners, n
 
 - **Login só com e-mail da Turbo** (`@turbopartners.com.br` / `@turbopartners.com`), validado no banco.
 - **Salas de voz/vídeo**: clicou, entrou. Microfone, câmera, compartilhar tela, desativar áudio (ensurdecer), volume por pessoa e indicador de quem está falando. Clique num vídeo ou numa tela para ampliar.
-- **Canais de texto** (#geral, #avisos, #random…) e **mensagens diretas**, com histórico salvo, links clicáveis e opção de apagar mensagem.
+- **Estrutura do servidor "Performance Turbo"**: categorias recolhíveis (Só os ADMs, 00 · ADMINISTRAÇÃO, 10 · LIDERANÇA, 20 · ACCOUNTS, 30 · GESTORES, 40 · GROWTH TURBO, 50 · DESIGN, 60 · CX/CS) com uma sala de voz por pessoa. Admins e Gestores criam, editam e excluem categorias e salas pela própria interface.
+- **Canais de texto** (🔔・avisos, 📁・materiais, 😂・memes, 💬・chat-geral) e **mensagens diretas**, com histórico salvo, links clicáveis e opção de apagar mensagem.
 - **Cargos**:
   - **Admin**: muda o cargo de qualquer pessoa, gerencia todas as salas e modera Gestores e Membros.
   - **Gestor**: cria, edita e exclui salas; muta, desmuta e remove Membros das salas de voz; apaga mensagens nos canais.
@@ -37,6 +38,7 @@ Atalhos: `Ctrl+Shift+A` microfone · `Ctrl+Shift+D` ensurdecer · `Ctrl+Shift+V`
 
 | Variável | Para quê |
 |---|---|
+| `SERVER_NAME` | Nome no topo da barra lateral (padrão: Performance Turbo) |
 | `ALLOWED_EMAIL_DOMAINS` | Domínios aceitos na tela de login (a regra definitiva fica no `schema.sql`) |
 | `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` | Servidor TURN para redes corporativas ou 4G, onde o vídeo P2P pode falhar |
 

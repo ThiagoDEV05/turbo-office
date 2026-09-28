@@ -8,6 +8,7 @@ export default function handler(req, res) {
   res.status(200).json({
     supabaseUrl: env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '',
     supabaseAnonKey: env.SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '',
+    serverName: env.SERVER_NAME || 'Performance Turbo',
     allowedDomains: (env.ALLOWED_EMAIL_DOMAINS || 'turbopartners.com.br,turbopartners.com').split(',').map((d) => d.trim()).filter(Boolean),
     iceServers,
   });

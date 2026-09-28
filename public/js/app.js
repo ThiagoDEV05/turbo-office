@@ -28,9 +28,14 @@ function renderAll() {
 
 // ------------------------------------------------------------------ Dados
 async function loadRooms() {
-  const { data, error } = await sb.from('rooms').select('id, name, kind, min_role, write_role, position');
+  const [cats, rooms] = await Promise.all([
+    sb.from('categories').select('id, name, position, min_role'),
+    sb.from('rooms').select('id, name, kind, category_id, min_role, write_role, position'),
+  ]);
+  const error = cats.error || rooms.error;
   if (error) { ui.toast({ title: 'Erro ao carregar salas', body: error.message }); return; }
-  state.rooms = new Map(data.map((r) => [r.id, r]));
+  state.categories = new Map(cats.data.map((c) => [c.id, c]));
+  state.rooms = new Map(rooms.data.map((r) => [r.id, r]));
   // Sala atual/visão podem ter sumido (excluída ou sem permissão)
   if (state.voiceRoom && !state.rooms.has(state.voiceRoom)) leaveVoice();
   if (state.view && state.view.type !== 'dm' && !state.rooms.has(state.view.id)) selectView(defaultView());
@@ -131,7 +136,8 @@ const actions = {
     return null;
   },
   async createRoom(data) {
-    const position = Math.max(0, ...[...state.rooms.values()].map((r) => r.position)) + 1;
+    const siblings = [...state.rooms.values()].filter((r) => (r.category_id || null) === data.category_id);
+    const position = Math.max(-1, ...siblings.map((r) => r.position)) + 1;
     const { data: row, error } = await sb.from('rooms').insert({ ...data, position, created_by: state.me }).select().single();
     if (error) return errMsg(error);
     await loadRooms();
@@ -146,6 +152,25 @@ const actions = {
   },
   async deleteRoom(id) {
     const { error } = await sb.from('rooms').delete().eq('id', id);
+    if (error) return errMsg(error);
+    await loadRooms();
+    return null;
+  },
+  async createCategory(data) {
+    const position = Math.max(-1, ...[...state.categories.values()].map((c) => c.position)) + 1;
+    const { error } = await sb.from('categories').insert({ ...data, position });
+    if (error) return errMsg(error);
+    await loadRooms();
+    return null;
+  },
+  async updateCategory(id, data) {
+    const { error } = await sb.from('categories').update(data).eq('id', id);
+    if (error) return errMsg(error);
+    await loadRooms();
+    return null;
+  },
+  async deleteCategory(id) {
+    const { error } = await sb.from('categories').delete().eq('id', id);
     if (error) return errMsg(error);
     await loadRooms();
     return null;
@@ -179,6 +204,7 @@ function bindEvents() {
   on('open-view', selectView);
 
   on('db:rooms', () => loadRooms());
+  on('db:categories', () => loadRooms());
   on('db:profiles', (p) => {
     const row = p.new;
     if (!row?.id) return;
@@ -275,6 +301,8 @@ async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return location.replace('/login');
   state.me = session.user.id;
+  $('#serverName').textContent = state.cfg.serverName || 'Turbo Office';
+  document.title = state.cfg.serverName ? `${state.cfg.serverName} · Turbo Office` : 'Turbo Office';
   sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') location.replace('/login'); });
 
   const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role');
