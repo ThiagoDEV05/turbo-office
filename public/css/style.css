@@ -515,3 +515,9 @@ body.dragging-user .chan.voice:hover, .chan.voice.drop-over { background: color-
 .queue-row { display: flex; gap: 8px; align-items: center; }
 .queue-row .q-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctl.on { background: rgba(34, 211, 238, .2); color: var(--accent); }
+
+/* Ícone de chat em cada sala de voz (aparece no hover; fica visível com mensagens novas) */
+.chan .room-chat { display: none; position: relative; font-size: 13px; padding: 2px 5px; border-radius: 6px; opacity: .75; }
+.chan:hover .room-chat, .chan .room-chat.has-unread { display: inline-flex; align-items: center; gap: 3px; }
+.chan .room-chat:hover { opacity: 1; background: var(--hover); }
+.chan .room-chat .badge { position: static; font-size: 10px; line-height: 15px; padding: 0 5px; }

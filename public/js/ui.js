@@ -162,8 +162,15 @@ function roomEntry(r, unreadOf) {
   }
   const inside = membersIn(r.id);
   const here = state.voiceRoom === r.id;
+  // Ícone de chat da sala (como no Discord): abre o chat sem entrar na chamada
+  const chatUnread = unreadOf(`room:${r.id}`);
+  const chatBtn = h('span', {
+    class: `room-chat${chatUnread ? ' has-unread' : ''}`,
+    title: 'Abrir chat da sala',
+    onclick: (e) => { e.stopPropagation(); A.openRoomChat(r.id); },
+  }, '💬', chatUnread ? h('span', { class: 'badge' }, chatUnread > 99 ? '99+' : String(chatUnread)) : null);
   const btn = h('button', { class: `chan voice${isActive('voice', r.id) ? ' active' : ''}${here ? ' here' : ''}`, 'data-room': r.id, onclick: () => A.joinVoice(r.id), title: here ? 'Você está nesta sala' : 'Entrar na sala' },
-    h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, edit);
+    h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, chatBtn, edit);
   btn.querySelector('.ico').innerHTML = icons.speaker;
   const out = [btn];
   const music = state.music.get(r.id)?.current;

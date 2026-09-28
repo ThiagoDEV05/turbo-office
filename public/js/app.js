@@ -213,6 +213,13 @@ const errMsg = (error) => {
 
 const actions = {
   selectView,
+  // Abre o chat de uma sala de voz sem entrar na chamada (como no Discord)
+  openRoomChat(roomId) {
+    if (!state.rooms.has(roomId)) return;
+    if (!chat.isVoiceChatOpen()) chat.setVoiceChatOpen(true);
+    selectView({ type: 'voice', id: roomId });
+    setTimeout(() => $('#vcInput')?.focus(), 50);
+  },
   joinVoice,
   leaveVoice: () => leaveVoice(),
   dmChannels: () => {

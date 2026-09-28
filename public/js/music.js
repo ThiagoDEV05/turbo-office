@@ -243,6 +243,11 @@ export async function handleCommand(text, key, { silent = false } = {}) {
   const me = displayName(state.me);
   if (['help', 'h', 'ajuda', ''].includes(cmd)) return reply(HELP);
   if (!room) return reply('🔈 Entre numa sala de voz primeiro — eu toco a música para quem estiver na sua sala.');
+  // Comando no chat de OUTRA sala de voz: toca onde a pessoa está? Não — pede para entrar na sala do chat.
+  const chatRoom = key?.startsWith('room:') ? state.rooms.get(key.slice(5)) : null;
+  if (chatRoom?.kind === 'voice' && chatRoom.id !== room) {
+    return reply(`🔈 Você não está em 🔊 ${chatRoom.name}. Entre nessa sala para tocar música aqui (ou use o chat da sala em que você está).`);
+  }
   const r = row();
   const cur = r?.current;
   try {
