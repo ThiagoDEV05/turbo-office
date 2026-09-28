@@ -1,16 +1,11 @@
 {
   "name": "turbo-office",
-  "version": "1.0.0",
-  "description": "Escritório virtual da Turbo Partners — avatares, áudio/vídeo por proximidade, salas, tela e chat.",
+  "version": "2.0.0",
+  "description": "Turbo Office — salas de voz/vídeo, canais de texto e cargos para o time da Turbo Partners. Vercel + Supabase.",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node --no-warnings server.js",
-    "dev": "node --no-warnings --watch server.js"
+    "dev": "node dev-server.mjs"
   },
-  "engines": { "node": ">=22.13" },
-  "dependencies": {
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1"
-  }
+  "engines": { "node": ">=20" }
 }

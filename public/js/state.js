@@ -1,50 +1,48 @@
 // Estado compartilhado entre os módulos do cliente.
-import { privateAreaAt } from './map.js';
 
 export const state = {
-  me: null,               // id do usuário local
-  players: new Map(),     // id -> jogador online
-  users: new Map(),       // id -> { id, name, avatar } (todos cadastrados)
-  socket: null,
-  zoom: 1.5,
-  inRange: new Set(),     // ids com quem estou em conversa (proximidade/sala)
+  cfg: null,
+  me: null,               // uuid do usuário local
+  profiles: new Map(),    // id -> { id, email, name, color, role }
+  rooms: new Map(),       // id -> { id, name, kind, min_role, write_role, position }
+  presence: new Map(),    // id -> { room, media: {mic,cam,screen}, deaf, status, statusText }
+  voiceRoom: null,        // id da sala de voz em que estou
+  view: null,             // { type: 'text'|'voice'|'dm', id }
   speaking: new Set(),    // ids falando agora (inclui o local)
-  joined: false,
+  deafened: false,
+  modMuted: false,        // mutado por Gestor/Admin
+  connected: false,
 };
 
 export const bus = new EventTarget();
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
 export const on = (name, fn) => bus.addEventListener(name, (e) => fn(e.detail));
 
-export const me = () => state.players.get(state.me);
+export const ROLES = {
+  admin: { label: 'Admin', rank: 3, color: '#f43f5e' },
+  gestor: { label: 'Gestor', rank: 2, color: '#f59e0b' },
+  membro: { label: 'Membro', rank: 1, color: '#94a3b8' },
+};
+export const rank = (role) => ROLES[role]?.rank || 0;
+export const myProfile = () => state.profiles.get(state.me);
+export const myRank = () => rank(myProfile()?.role);
+export const canManageRooms = () => myRank() >= 2;
+// Gestor/Admin só moderam quem tem cargo abaixo do seu.
+export const canModerate = (id) => id !== state.me && myRank() >= 2 && myRank() > rank(state.profiles.get(id)?.role);
 
-// Regras de proximidade — idênticas em todos os clientes para que ambos os lados concordem.
-export const RANGE_IN = 3.2;   // conecta a esta distância (tiles)
-export const RANGE_OUT = 4.6;  // desconecta além desta (histerese)
+export const STATUS_LABEL = { available: 'Disponível', busy: 'Ocupado', away: 'Ausente' };
+export const COLORS = ['#22d3ee', '#0ea5e9', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f97316', '#f59e0b', '#10b981', '#14b8a6', '#64748b'];
 
-export function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+export const dmKey = (a, b) => (a < b ? `dm:${a}:${b}` : `dm:${b}:${a}`);
+export const dmOther = (key) => { const [, a, b] = key.split(':'); return a === state.me ? b : a; };
+export const roomKey = (roomId) => `room:${roomId}`;
 
-export function shouldTalk(a, b, connected) {
-  if (!a || !b || a.id === b.id) return false;
-  if (a.status === 'busy' || b.status === 'busy') return false;
-  const A = privateAreaAt(a.x, a.y);
-  const B = privateAreaAt(b.x, b.y);
-  if (A || B) return !!(A && B && A.id === B.id);
-  return distance(a, b) <= (connected ? RANGE_OUT : RANGE_IN);
+export function displayName(id) { return state.profiles.get(id)?.name || 'Alguém'; }
+export function colorOf(id) {
+  const c = state.profiles.get(id)?.color;
+  return /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#64748b';
 }
-
-// Volume de 0..1 conforme a distância (salas privadas = volume cheio).
-export function volumeFor(a, b) {
-  if (privateAreaAt(a.x, a.y)) return 1;
-  const d = distance(a, b);
-  if (d <= 1.5) return 1;
-  return Math.max(0.15, 1 - (d - 1.5) / (RANGE_OUT - 1.5) * 0.85);
-}
-
-export function displayName(id) {
-  return state.players.get(id)?.name || state.users.get(id)?.name || 'Alguém';
-}
-
 export function initials(name = '') {
   return name.split(' ').filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('') || '?';
 }
+export const membersIn = (roomId) => [...state.presence.entries()].filter(([, p]) => p.room === roomId).map(([id]) => id);

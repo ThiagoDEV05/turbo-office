@@ -13,7 +13,7 @@
       <img src="/favicon.svg" alt="" width="40" height="40">
       <div>
         <h1>Turbo Office</h1>
-        <p>O escritório virtual da Turbo Partners</p>
+        <p>Salas, chamadas e chat do time Turbo Partners</p>
       </div>
     </div>
 
@@ -25,50 +25,90 @@
     <form id="authForm" novalidate>
       <label class="field" id="nameField" hidden>
         <span>Nome</span>
-        <input name="name" autocomplete="name" maxlength="32" placeholder="Como o time te chama">
+        <input name="name" class="input" autocomplete="name" maxlength="32" placeholder="Como o time te chama">
       </label>
       <label class="field">
         <span>E-mail da Turbo</span>
-        <input name="email" type="email" autocomplete="email" required placeholder="voce@turbopartners.com.br">
+        <input name="email" class="input" type="email" autocomplete="email" required placeholder="voce@turbopartners.com.br">
       </label>
       <label class="field">
         <span>Senha</span>
-        <input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="••••••••">
+        <input name="password" class="input" type="password" autocomplete="current-password" required minlength="8" placeholder="••••••••">
       </label>
       <p class="error" id="error" role="alert"></p>
+      <div class="notice" id="notice" hidden></div>
       <button class="btn primary block" type="submit" id="submitBtn">Entrar</button>
     </form>
-    <p class="muted small center">Acesso exclusivo para e-mails @turbopartners.com.br</p>
+    <p class="muted small center" id="domainHint">Acesso exclusivo para e-mails da Turbo Partners</p>
   </main>
 
-  <script>
+  <script type="module">
+    import { getSupabase, getConfig } from '/js/supa.js';
+
     const form = document.getElementById('authForm');
     const err = document.getElementById('error');
-    const nameField = document.getElementById('nameField');
+    const notice = document.getElementById('notice');
     const submitBtn = document.getElementById('submitBtn');
     let mode = 'login';
+
+    const COLORS = ['#22d3ee', '#0ea5e9', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f97316', '#f59e0b', '#10b981', '#14b8a6'];
+    const translate = (msg = '') => {
+      if (/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
+      if (/email not confirmed/i.test(msg)) return 'Confirme seu e-mail pelo link que enviamos antes de entrar.';
+      if (/already registered|already been registered/i.test(msg)) return 'Esse e-mail já tem conta. Use a aba Entrar.';
+      if (/database error saving new user|DOMINIO/i.test(msg)) return 'Apenas e-mails da Turbo Partners podem criar conta.';
+      if (/password should be at least/i.test(msg)) return 'A senha precisa ter pelo menos 8 caracteres.';
+      if (/rate limit/i.test(msg)) return 'Muitas tentativas. Aguarde alguns minutos.';
+      return msg || 'Não foi possível continuar.';
+    };
+
+    let sb, cfg;
+    try {
+      [sb, cfg] = await Promise.all([getSupabase(), getConfig()]);
+      document.getElementById('domainHint').textContent = `Acesso exclusivo para e-mails ${cfg.allowedDomains.map((d) => '@' + d).join(' ou ')}`;
+      const { data } = await sb.auth.getSession();
+      if (data.session) location.replace('/');
+    } catch (e) {
+      err.textContent = e.message;
+      submitBtn.disabled = true;
+    }
 
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
       mode = t.dataset.mode;
       document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-      nameField.hidden = mode !== 'register';
-      submitBtn.textContent = mode === 'register' ? 'Criar conta e entrar' : 'Entrar';
+      document.getElementById('nameField').hidden = mode !== 'register';
+      submitBtn.textContent = mode === 'register' ? 'Criar conta' : 'Entrar';
       form.password.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
-      err.textContent = '';
+      err.textContent = ''; notice.hidden = true;
     }));
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      err.textContent = '';
+      err.textContent = ''; notice.hidden = true;
+      const email = form.email.value.trim().toLowerCase();
+      const password = form.password.value;
+      const name = form.name.value.trim();
+      if (!cfg.allowedDomains.includes(email.split('@')[1] || '')) { err.textContent = `Use seu e-mail ${cfg.allowedDomains.map((d) => '@' + d).join(' ou ')}.`; return; }
+      if (password.length < 8) { err.textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+      if (mode === 'register' && !name) { err.textContent = 'Informe seu nome.'; return; }
       submitBtn.disabled = true;
       try {
-        const body = { email: form.email.value, password: form.password.value, name: form.name.value };
-        const res = await fetch(`/api/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Não foi possível entrar.');
-        location.href = '/';
+        if (mode === 'register') {
+          const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+          const { data, error } = await sb.auth.signUp({ email, password, options: { data: { name, color }, emailRedirectTo: location.origin + '/' } });
+          if (error) throw error;
+          if (!data.session) {
+            notice.textContent = `Conta criada! Enviamos um link de confirmação para ${email}. Confirme e depois entre.`;
+            notice.hidden = false;
+            return;
+          }
+        } else {
+          const { error } = await sb.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+        }
+        location.replace('/');
       } catch (ex) {
-        err.textContent = ex.message;
+        err.textContent = translate(ex.message);
       } finally {
         submitBtn.disabled = false;
       }

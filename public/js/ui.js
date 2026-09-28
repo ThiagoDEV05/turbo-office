@@ -1,20 +1,22 @@
-// Interface: barra lateral (pessoas/chat), popovers, notificações e modal de configuração.
-import { state, on, me, displayName, initials } from './state.js';
-import { areaAt } from './map.js';
-import { avatarPreview, AVATAR_OPTIONS } from './render.js';
-import { local, startMic, startCam, stopCam, publishMedia, switchDevice } from './rtc.js';
+// Renderização da interface: canais, membros, cabeçalho, popovers, modais e notificações.
+import {
+  state, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
+  displayName, colorOf, initials, membersIn, dmOther,
+} from './state.js';
+import { local, switchDevice, getUserVolume, setUserVolume } from './rtc.js';
 
-const $ = (s) => document.querySelector(s);
-const h = (tag, props = {}, ...children) => {
+export const $ = (s) => document.querySelector(s);
+export function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (k === 'class') el.className = v;
+    else if (k === 'style') el.setAttribute('style', v);
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
+    else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of children.flat()) if (c != null) el.append(c);
+  for (const c of children.flat()) if (c != null && c !== false) el.append(c);
   return el;
-};
+}
 
 const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const icons = {
@@ -23,350 +25,304 @@ export const icons = {
   cam: svg('<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/>'),
   camOff: svg('<path d="M16 16v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1M9.7 5H14a2 2 0 0 1 2 2v3.3l1 1L22 7v10M3 3l18 18"/>'),
   screen: svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4M9 10l3-3 3 3M12 7v6"/>'),
-  people: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>'),
-  chat: svg('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'),
+  head: svg('<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/>'),
+  headOff: svg('<path d="M3 14v-2a9 9 0 0 1 14.5-7.1M21 12v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/><path d="M3 3l18 18"/>'),
+  leave: svg('<path d="M10.7 13.3a13 13 0 0 1-2.4-3.3l1.5-1.5a1 1 0 0 0 .2-1.1L8.6 4.6A1 1 0 0 0 7.5 4H4a1 1 0 0 0-1 1 17 17 0 0 0 4.9 11.1M13.3 10.7M22 2L2 22M17.1 16.1l1.3-1.3a1 1 0 0 1 1.1-.2l2.8 1.3a1 1 0 0 1 .6 1V20a1 1 0 0 1-1 1 17 17 0 0 1-8.4-2.3"/>'),
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  people: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>'),
 };
 
-export const STATUS_LABEL = { available: 'Disponível', busy: 'Ocupado', away: 'Ausente' };
-export const EMOTES = ['👋', '👍', '❤️', '😂', '🎉', '✋', '👏', '🤔'];
-const HAIR_NAMES = ['Curto', 'Espetado', 'Longo', 'Coque', 'Careca'];
+let A = {}; // ações registradas pelo app.js
+export function setActions(actions) { A = actions; }
 
-let actions = {};
-
-export function initUI(a) {
-  actions = a;
-  $('#peopleBtn').insertAdjacentHTML('afterbegin', icons.people);
-  $('#chatBtn').insertAdjacentHTML('afterbegin', icons.chat);
-  $('#settingsBtn').innerHTML = icons.gear;
-  $('#screenBtn').innerHTML = icons.screen;
-
-  $('#peopleBtn').onclick = () => toggleSidebar('people');
-  $('#chatBtn').onclick = () => toggleSidebar('chat');
-  $('#closeSide').onclick = () => toggleSidebar(null);
-  document.querySelectorAll('.side-tabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
-  $('#peopleSearch').oninput = () => { peopleSig = ''; refreshPeople(); };
-  $('#settingsBtn').onclick = () => openSetup('settings');
-  $('#meBtn').onclick = (e) => { e.stopPropagation(); openStatusMenu(); };
-  $('#emoteBtn').onclick = (e) => { e.stopPropagation(); openEmotePicker(); };
-  $('#chatForm').onsubmit = (e) => { e.preventDefault(); sendChat(); };
-  $('#spotClose').onclick = closeSpotlight;
-  $('#spotlight').onclick = (e) => { if (e.target.id === 'spotlight') closeSpotlight(); };
-
-  document.addEventListener('pointerdown', (e) => {
-    for (const id of ['#emotePicker', '#statusMenu', '#playerCard']) {
-      const el = $(id);
-      if (!el.hidden && !el.contains(e.target)) el.hidden = true;
-    }
-  });
-
-  on('range', () => { renderChannels(); peopleSig = ''; refreshPeople(); });
-  setInterval(refreshPeople, 700);
-}
-
-// ------------------------------------------------------------------ Barra inferior
-export function renderMeBar() {
-  const p = me();
-  if (!p) return;
-  avatarPreview($('#meAvatar'), p.avatar, 2);
-  $('.me-name').textContent = p.name;
-  const st = $('.me-status');
-  st.innerHTML = '';
-  st.append(h('span', { class: `dot ${p.status}` }), p.statusText || STATUS_LABEL[p.status]);
-}
-
-export function renderMediaButtons() {
-  const micOn = !!(local.mic && local.micOn);
-  for (const [sel, on_, onIcon, offIcon] of [['#micBtn', micOn, icons.mic, icons.micOff], ['#camBtn', !!local.cam, icons.cam, icons.camOff], ['#pvMic', micOn, icons.mic, icons.micOff], ['#pvCam', !!local.cam, icons.cam, icons.camOff]]) {
-    const b = $(sel);
-    b.innerHTML = on_ ? onIcon : offIcon;
-    b.classList.toggle('off', !on_);
+// ------------------------------------------------------------------ Avatar
+export function avatar(id, size = '', withStatus = false) {
+  const p = state.profiles.get(id);
+  const el = h('span', { class: `avatar ${size}${state.speaking.has(id) ? ' speaking' : ''}`, style: `background:${colorOf(id)}` }, initials(p?.name));
+  if (withStatus) {
+    const pr = state.presence.get(id);
+    el.append(h('span', { class: `st ${pr ? pr.status : 'offline'}` }));
   }
-  $('#screenBtn').classList.toggle('on', !!local.screen);
-  $('#screenBtn').title = local.screen ? 'Parar de compartilhar' : 'Compartilhar tela';
+  return el;
 }
 
-// ------------------------------------------------------------------ Sidebar
-function toggleSidebar(tab) {
-  const sb = $('#sidebar');
-  const current = sb.hidden ? null : document.querySelector('.side-tabs .active')?.dataset.tab;
-  if (!tab || current === tab) { sb.hidden = true; document.body.classList.remove('side-open'); return; }
-  sb.hidden = false;
-  document.body.classList.add('side-open');
-  showTab(tab);
-}
-function showTab(tab) {
-  document.querySelectorAll('.side-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  $('#peoplePanel').hidden = tab !== 'people';
-  $('#chatPanel').hidden = tab !== 'chat';
-  if (tab === 'chat') { markRead(activeChannel); renderMessages(); setTimeout(() => $('#chatInput').focus(), 0); }
-  else { peopleSig = ''; refreshPeople(); }
-}
-export function openChat(channel) {
-  const sb = $('#sidebar');
-  sb.hidden = false;
-  document.body.classList.add('side-open');
-  if (channel) selectChannel(channel);
-  showTab('chat');
-}
-const chatVisible = () => !$('#sidebar').hidden && !$('#chatPanel').hidden;
+// ------------------------------------------------------------------ Lista de canais
+const roomsOf = (kind) => [...state.rooms.values()].filter((r) => r.kind === kind).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+const isActive = (type, id) => state.view?.type === type && state.view.id === id;
 
-// ------------------------------------------------------------------ Pessoas
-let peopleSig = '';
-export function refreshPeople() {
-  $('#onlineCount').textContent = state.players.size;
-  if ($('#sidebar').hidden || $('#peoplePanel').hidden) return;
-  const term = $('#peopleSearch').value.trim().toLowerCase();
-  const match = (n) => !term || n.toLowerCase().includes(term);
-  const online = [...state.players.values()].filter((p) => match(p.name)).sort((a, b) => (a.id === state.me ? -1 : b.id === state.me ? 1 : a.name.localeCompare(b.name)));
-  const offline = [...state.users.values()].filter((u) => !state.players.has(u.id) && match(u.name)).sort((a, b) => a.name.localeCompare(b.name));
-  const sig = JSON.stringify([online.map((p) => [p.id, p.name, p.status, p.statusText, areaAt(p.x, p.y)?.id, state.inRange.has(p.id), p.avatar]), offline.map((u) => [u.id, u.name])]);
-  if (sig === peopleSig) return;
-  peopleSig = sig;
+export function renderChannels(unreadOf) {
+  const nav = $('#channelList');
+  const scroll = nav.scrollTop;
+  nav.innerHTML = '';
+  const manage = canManageRooms();
+  const lockIcon = (r) => (r.min_role !== 'membro' ? h('span', { class: 'lock', title: `Só ${ROLES[r.min_role].label}+` }, '🔒') : null);
+  const editBtn = (r) => (manage && myRank() >= rank(r.min_role)
+    ? h('span', { class: 'edit', title: 'Editar sala', onclick: (e) => { e.stopPropagation(); openRoomModal(r); } }, '⚙')
+    : null);
 
-  const list = $('#peopleList');
+  nav.append(h('div', { class: 'sec-head' }, 'Canais de texto', manage ? h('button', { class: 'icon-btn', title: 'Criar canal', onclick: () => openRoomModal(null, 'text') }, '+') : null));
+  for (const r of roomsOf('text')) {
+    const unread = unreadOf(`room:${r.id}`);
+    nav.append(h('button', { class: `chan${isActive('text', r.id) ? ' active' : ''}${unread ? ' unread' : ''}`, onclick: () => A.selectView({ type: 'text', id: r.id }) },
+      h('span', { class: 'ico' }, '#'), h('span', { class: 'nm' }, r.name), lockIcon(r),
+      unread ? h('span', { class: 'badge' }, unread > 99 ? '99+' : String(unread)) : null, editBtn(r)));
+  }
+
+  nav.append(h('div', { class: 'sec-head' }, 'Salas de voz', manage ? h('button', { class: 'icon-btn', title: 'Criar sala', onclick: () => openRoomModal(null, 'voice') }, '+') : null));
+  for (const r of roomsOf('voice')) {
+    const inside = membersIn(r.id);
+    nav.append(h('button', {
+      class: `chan${isActive('voice', r.id) ? ' active' : ''}`,
+      onclick: () => A.joinVoice(r.id),
+      title: state.voiceRoom === r.id ? 'Você está nesta sala' : 'Entrar na sala',
+    }, h('span', { class: 'ico' }, state.voiceRoom === r.id ? '🔊' : '🔈'), h('span', { class: 'nm' }, r.name), lockIcon(r),
+    inside.length ? h('span', { class: 'muted small' }, String(inside.length)) : null, editBtn(r)));
+    if (inside.length) {
+      const list = h('div', { class: 'voice-members' });
+      for (const id of inside.sort((a, b) => displayName(a).localeCompare(displayName(b)))) {
+        const p = state.presence.get(id);
+        const flags = `${p.media.screen ? '🖥️' : ''}${p.media.cam ? '📷' : ''}${p.media.mic ? '' : '🔇'}${p.deaf ? '🎧' : ''}`;
+        list.append(h('div', { class: 'vm', onclick: (e) => openMemberPopover(id, e.currentTarget) }, avatar(id, 'xs'), h('span', { class: 'nm' }, displayName(id)), h('span', { class: 'flags' }, flags)));
+      }
+      nav.append(list);
+    }
+  }
+
+  const dms = [...new Set([...(A.dmChannels?.() || [])])];
+  if (dms.length) {
+    nav.append(h('div', { class: 'sec-head' }, 'Mensagens diretas'));
+    for (const key of dms) {
+      const other = dmOther(key);
+      if (!state.profiles.has(other)) continue;
+      const unread = unreadOf(key);
+      nav.append(h('button', { class: `chan${isActive('dm', other) ? ' active' : ''}${unread ? ' unread' : ''}`, onclick: () => A.selectView({ type: 'dm', id: other }) },
+        avatar(other, 'xs', true), h('span', { class: 'nm' }, displayName(other)),
+        unread ? h('span', { class: 'badge' }, String(unread)) : null));
+    }
+  }
+  nav.scrollTop = scroll;
+}
+
+// ------------------------------------------------------------------ Membros (coluna direita)
+export function renderMembers() {
+  const list = $('#memberList');
   const scroll = list.scrollTop;
   list.innerHTML = '';
-  list.append(h('div', { class: 'group-title' }, `Online — ${online.length}`));
-  for (const p of online) list.append(personRow(p, true));
+  const all = [...state.profiles.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const online = all.filter((p) => state.presence.has(p.id));
+  const offline = all.filter((p) => !state.presence.has(p.id));
+  for (const role of ['admin', 'gestor', 'membro']) {
+    const group = online.filter((p) => p.role === role);
+    if (!group.length) continue;
+    list.append(h('div', { class: 'sec-head' }, `${ROLES[role].label}s — ${group.length}`));
+    for (const p of group) list.append(memberRow(p, true));
+  }
   if (offline.length) {
-    list.append(h('div', { class: 'group-title' }, `Offline — ${offline.length}`));
-    for (const u of offline) list.append(personRow(u, false));
+    list.append(h('div', { class: 'sec-head' }, `Offline — ${offline.length}`));
+    for (const p of offline) list.append(memberRow(p, false));
   }
   list.scrollTop = scroll;
 }
 
-function personRow(p, isOnline) {
-  const cv = h('canvas', { width: 72, height: 72 });
-  avatarPreview(cv, p.avatar, 2);
-  const isMe = p.id === state.me;
-  const sub = h('div', { class: 'sub' });
+function memberRow(p, isOnline) {
+  const pr = state.presence.get(p.id);
+  let sub = '';
   if (isOnline) {
-    sub.append(h('span', { class: `dot ${p.status}` }));
-    if (state.inRange.has(p.id)) sub.append(h('span', { class: 'near-tag' }, 'Conversando · '));
-    sub.append(p.statusText || areaAt(p.x, p.y)?.name || STATUS_LABEL[p.status]);
-  } else sub.append(h('span', { class: 'dot offline' }), 'Offline');
-
-  const acts = h('div', { class: 'acts' });
-  if (!isMe) {
-    if (isOnline) acts.append(h('button', { title: 'Ir até', onclick: () => actions.gotoPlayer(p.id) }, '🚶'));
-    acts.append(h('button', { title: 'Mensagem', onclick: () => openChat(dmKey(p.id)) }, '💬'));
-    if (isOnline) acts.append(h('button', { title: 'Chamar', onclick: () => actions.ring(p.id) }, '🔔'));
+    const room = pr.room && state.rooms.get(pr.room);
+    sub = pr.statusText || (room ? `🔊 ${room.name}` : pr.room ? '🔊 Em uma sala' : STATUS_LABEL[pr.status]);
   }
-  return h('div', { class: `person${isOnline ? '' : ' offline'}` }, cv,
-    h('div', { class: 'info' }, h('div', { class: 'name' }, p.name + (isMe ? ' (você)' : '')), sub), acts);
+  return h('div', { class: `member${isOnline ? '' : ' offline'}`, onclick: (e) => openMemberPopover(p.id, e.currentTarget) },
+    avatar(p.id, 'sm', true),
+    h('div', { class: 'info' }, h('div', { class: 'name', style: `color:${p.role === 'membro' ? 'inherit' : ROLES[p.role].color}` }, p.name), sub ? h('div', { class: 'sub' }, sub) : null));
 }
 
-// ------------------------------------------------------------------ Chat
-const channels = new Map(); // key -> { messages, unread, loaded, last }
-let activeChannel = 'global';
-export const dmKey = (other) => `dm:${Math.min(state.me, other)}:${Math.max(state.me, other)}`;
-const dmOther = (key) => { const [, a, b] = key.split(':').map(Number); return a === state.me ? b : a; };
-const channel = (key) => { if (!channels.has(key)) channels.set(key, { messages: [], unread: 0, loaded: key === 'nearby', last: 0 }); return channels.get(key); };
-
-export function initChat(history, dmChannels) {
-  channels.clear();
-  const g = channel('global');
-  g.messages = history; g.loaded = true; g.last = history.at(-1)?.ts || 0;
-  channel('nearby');
-  for (const k of dmChannels) channel(k);
-  renderChannels(); renderMessages(); updateBadge();
-}
-
-function channelName(key) {
-  if (key === 'global') return '# Todos';
-  if (key === 'nearby') return `📍 Por perto${state.inRange.size ? ` (${state.inRange.size})` : ''}`;
-  return displayName(dmOther(key));
-}
-
-function renderChannels() {
-  const wrap = $('#chatChannels');
-  wrap.innerHTML = '';
-  const keys = ['global', 'nearby', ...[...channels.keys()].filter((k) => k.startsWith('dm:')).sort((a, b) => channel(b).last - channel(a).last)];
-  for (const k of keys) {
-    const c = channel(k);
-    wrap.append(h('button', { class: `chan${k === activeChannel ? ' active' : ''}`, onclick: () => selectChannel(k) },
-      channelName(k), c.unread ? h('span', { class: 'unread' }, String(c.unread)) : null));
+// ------------------------------------------------------------------ Cabeçalho, painel do usuário e controles
+export function renderHeader() {
+  const v = state.view;
+  let icon = '', title = '', sub = '';
+  if (v?.type === 'text') {
+    const r = state.rooms.get(v.id);
+    icon = '#'; title = r?.name || '';
+    sub = r?.write_role !== 'membro' ? `Só ${ROLES[r.write_role].label}+ podem escrever` : '';
+  } else if (v?.type === 'voice') {
+    const r = state.rooms.get(v.id);
+    icon = '🔊'; title = r?.name || '';
+    const n = membersIn(v.id).length;
+    sub = n ? `${n} ${n === 1 ? 'pessoa' : 'pessoas'}` : 'Vazia';
+  } else if (v?.type === 'dm') {
+    icon = '@'; title = displayName(v.id);
+    const pr = state.presence.get(v.id);
+    sub = pr ? (pr.statusText || STATUS_LABEL[pr.status]) : 'Offline';
   }
-  $('#chatInput').placeholder = activeChannel === 'global' ? 'Mensagem para Todos' : activeChannel === 'nearby' ? 'Mensagem para quem está perto' : `Mensagem para ${channelName(activeChannel)}`;
+  $('#mainIcon').textContent = icon;
+  $('#mainTitle').textContent = title;
+  $('#mainSub').textContent = sub;
 }
 
-function selectChannel(key) {
-  activeChannel = key;
-  const c = channel(key);
-  if (!c.loaded) {
-    c.loaded = true;
-    state.socket.emit('history', key, (msgs) => { c.messages = [...msgs, ...c.messages.filter((m) => !msgs.some((x) => x.id === m.id))]; renderMessages(); });
+export function renderUserPanel() {
+  const p = myProfile();
+  const pr = state.presence.get(state.me);
+  if (!p) return;
+  const av = $('#meAvatar');
+  av.replaceWith(Object.assign(avatar(state.me, 'sm', true), { id: 'meAvatar' }));
+  $('#meName').textContent = p.name;
+  $('#meStatus').textContent = pr?.statusText || `${STATUS_LABEL[pr?.status || 'available']} · ${ROLES[p.role].label}`;
+}
+
+export function renderControls() {
+  const inRoom = !!state.voiceRoom;
+  const micOn = !!(local.micOn && !state.modMuted && !state.deafened);
+  const set = (sel, on_, onIcon, offIcon, title) => {
+    const b = $(sel);
+    b.innerHTML = on_ ? onIcon : offIcon;
+    b.classList.toggle('off', !on_);
+    if (title) b.title = title;
+  };
+  set('#micBtn', micOn, icons.mic, icons.micOff, state.modMuted ? 'Mutado por um Gestor/Admin' : 'Microfone (Ctrl+Shift+A)');
+  set('#cMic', micOn, icons.mic, icons.micOff, state.modMuted ? 'Mutado por um Gestor/Admin' : 'Microfone (Ctrl+Shift+A)');
+  $('#micBtn').disabled = $('#cMic').disabled = state.modMuted;
+  set('#deafBtn', !state.deafened, icons.head, icons.headOff);
+  set('#cDeaf', !state.deafened, icons.head, icons.headOff);
+  const cam = $('#cCam');
+  cam.innerHTML = local.cam ? icons.cam : icons.camOff;
+  cam.classList.toggle('on', !!local.cam);
+  const scr = $('#cScreen');
+  scr.innerHTML = icons.screen;
+  scr.classList.toggle('on', !!local.screen);
+  scr.title = local.screen ? 'Parar de compartilhar' : 'Compartilhar tela';
+  $('#cLeave').innerHTML = icons.leave;
+  $('#settingsBtn').innerHTML = icons.gear;
+  $('#membersToggle').innerHTML = icons.people;
+
+  $('#voicePanel').hidden = !inRoom;
+  if (inRoom) {
+    $('#vpRoom').textContent = state.rooms.get(state.voiceRoom)?.name || '';
+    $('#vpStatus').textContent = state.connected ? 'Voz conectada' : 'Reconectando…';
+    $('#vpStatus').classList.toggle('warn', !state.connected);
   }
-  markRead(key);
-  renderChannels(); renderMessages();
 }
 
-function markRead(key) { channel(key).unread = 0; updateBadge(); renderChannels(); }
-function updateBadge() {
-  const n = [...channels.values()].reduce((s, c) => s + c.unread, 0);
-  const b = $('#chatBadge');
-  b.hidden = !n;
-  b.textContent = n > 99 ? '99+' : String(n);
-}
-
-const URL_RE = /(https?:\/\/[^\s<]+)/g;
-function linkify(text) {
-  const frag = document.createDocumentFragment();
-  text.split(URL_RE).forEach((part, i) => {
-    if (i % 2) frag.append(h('a', { href: part, target: '_blank', rel: 'noopener noreferrer' }, part));
-    else if (part) frag.append(part);
-  });
-  return frag;
-}
-const fmtTime = (ts) => new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-function renderMessages() {
-  const box = $('#chatMessages');
-  const msgs = channel(activeChannel).messages;
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  box.innerHTML = '';
-  if (!msgs.length) {
-    box.append(h('div', { class: 'chat-empty' }, activeChannel === 'nearby' ? 'Mensagens aqui vão só para quem está conversando com você agora.' : 'Nenhuma mensagem ainda. Diga oi! 👋'));
-    return;
+export function renderVoiceView() {
+  const v = state.view;
+  if (v?.type !== 'voice') return;
+  const inThis = state.voiceRoom === v.id;
+  $('#voiceLobby').hidden = inThis;
+  $('#stage').hidden = !inThis;
+  $('#callBar').hidden = !inThis;
+  if (!inThis) {
+    const r = state.rooms.get(v.id);
+    $('#lobbyTitle').textContent = r?.name || '';
+    const people = $('#lobbyPeople');
+    people.innerHTML = '';
+    const inside = membersIn(v.id);
+    if (!inside.length) people.append('Ninguém na sala ainda.');
+    for (const id of inside) people.append(h('span', { class: 'lobby-chip' }, avatar(id, 'xs'), displayName(id)));
   }
-  let prev = null;
-  for (const m of msgs) {
-    const cont = prev && prev.from === m.from && m.ts - prev.ts < 5 * 60e3;
-    const color = (state.players.get(m.from) || state.users.get(m.from))?.avatar?.shirt || '#64748b';
-    box.append(h('div', { class: `msg${cont ? ' cont' : ''}` },
-      h('div', { class: 'av', style: `background:${color}` }, initials(displayName(m.from))),
-      h('div', {}, cont ? null : h('div', { class: 'head' }, displayName(m.from), h('time', {}, fmtTime(m.ts))), h('div', { class: 'body' }, linkify(m.text)))));
-    prev = m;
-  }
-  if (atBottom || prev?.from === state.me) box.scrollTop = box.scrollHeight;
 }
-
-export function onChatMessage(m) {
-  const c = channel(m.channel);
-  if (c.messages.some((x) => x.id === m.id)) return;
-  c.messages.push(m);
-  if (c.messages.length > 300) c.messages.shift();
-  c.last = m.ts;
-  const visible = chatVisible() && activeChannel === m.channel;
-  if (!visible && m.from !== state.me) {
-    c.unread++;
-    if (m.channel !== 'global') {
-      toast({
-        title: m.channel === 'nearby' ? `${displayName(m.from)} (por perto)` : displayName(m.from),
-        body: m.text,
-        actions: [{ label: 'Responder', primary: true, onClick: () => openChat(m.channel) }],
-      });
-      beep(660);
-    }
-  }
-  updateBadge(); renderChannels();
-  if (activeChannel === m.channel) renderMessages();
-}
-
-function sendChat() {
-  const input = $('#chatInput');
-  const text = input.value.trim();
-  if (!text) return;
-  if (activeChannel === 'global') state.socket.emit('chat', { channel: 'global', text });
-  else if (activeChannel === 'nearby') {
-    if (!state.inRange.size) { toast({ title: 'Ninguém por perto', body: 'Chegue perto de alguém para usar este canal.' }); return; }
-    state.socket.emit('chat', { channel: 'nearby', to: [...state.inRange], text });
-  } else state.socket.emit('chat', { to: dmOther(activeChannel), text });
-  input.value = '';
-}
-
-export function focusChat() { openChat(); }
 
 // ------------------------------------------------------------------ Popovers
-function placeNear(el, x, y) {
-  el.hidden = false;
-  const r = el.getBoundingClientRect();
-  el.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x))}px`;
-  el.style.top = `${Math.max(8, Math.min(window.innerHeight - r.height - 8, y))}px`;
-}
-function placeAbove(el, anchor) {
+export function closePopover() { $('#popover').hidden = true; }
+function showPopover(anchor, build, side = 'auto') {
+  const el = $('#popover');
+  el.innerHTML = '';
+  build(el);
   el.hidden = false;
   const a = anchor.getBoundingClientRect();
   const r = el.getBoundingClientRect();
-  placeNear(el, a.left + a.width / 2 - r.width / 2, a.top - r.height - 10);
+  let x, y;
+  if (side === 'above') { x = a.left; y = a.top - r.height - 8; }
+  else if (a.left > innerWidth / 2) { x = a.left - r.width - 10; y = a.top; }
+  else { x = a.right + 10; y = a.top; }
+  el.style.left = `${Math.max(8, Math.min(innerWidth - r.width - 8, x))}px`;
+  el.style.top = `${Math.max(8, Math.min(innerHeight - r.height - 8, y))}px`;
 }
 
-function openEmotePicker() {
-  const el = $('#emotePicker');
-  if (!el.hidden) { el.hidden = true; return; }
-  el.innerHTML = '';
-  EMOTES.forEach((e, i) => el.append(h('button', { onclick: () => { actions.emote(e); el.hidden = true; } }, e, h('kbd', {}, String(i + 1)))));
-  placeAbove(el, $('#emoteBtn'));
-}
-
-function openStatusMenu() {
-  const el = $('#statusMenu');
-  if (!el.hidden) { el.hidden = true; return; }
-  const p = me();
-  el.innerHTML = '';
-  for (const s of ['available', 'busy', 'away']) {
-    el.append(h('button', { class: `menu-item${p.status === s ? ' active' : ''}`, onclick: () => { actions.setStatus(s, p.statusText); el.hidden = true; } },
-      h('span', { class: `dot ${s}` }), s === 'busy' ? 'Ocupado — não perturbe' : STATUS_LABEL[s]));
-  }
-  const txt = h('input', { class: 'input', maxlength: 60, placeholder: 'Mensagem de status (ex.: Em call com cliente)', value: p.statusText || '' });
-  txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { actions.setStatus(p.status, txt.value); el.hidden = true; } e.stopPropagation(); });
-  el.append(h('div', { class: 'menu-sep' }), txt,
-    h('div', { class: 'menu-sep' }),
-    h('button', { class: 'menu-item', onclick: () => { el.hidden = true; openSetup('settings'); } }, '🎨 Editar avatar e dispositivos'),
-    h('button', { class: 'menu-item', onclick: () => actions.logout() }, '🚪 Sair'));
-  placeAbove(el, $('#meBtn'));
-}
-
-export function openPlayerCard(id, x, y) {
-  const p = state.players.get(id);
+export function openMemberPopover(id, anchor) {
+  const p = state.profiles.get(id);
   if (!p) return;
-  const el = $('#playerCard');
-  el.innerHTML = '';
-  const cv = h('canvas', { width: 96, height: 96 });
-  avatarPreview(cv, p.avatar, 2.6);
-  const isMe = id === state.me;
-  el.append(h('div', { class: 'card-head' }, cv, h('div', {},
-    h('div', { class: 'name' }, p.name + (isMe ? ' (você)' : '')),
-    h('div', { class: 'muted small' }, h('span', { class: `dot ${p.status}` }), ' ', p.statusText || STATUS_LABEL[p.status]),
-    h('div', { class: 'muted small' }, areaAt(p.x, p.y)?.name || ''))));
-  const acts = h('div', { class: 'card-acts' });
-  const close = () => (el.hidden = true);
-  if (isMe) acts.append(h('button', { class: 'btn', onclick: () => { close(); openSetup('settings'); } }, 'Editar avatar'));
-  else acts.append(
-    h('button', { class: 'btn primary', onclick: () => { close(); actions.gotoPlayer(id); } }, '🚶 Ir até'),
-    h('button', { class: 'btn', onclick: () => { close(); openChat(dmKey(id)); } }, '💬 Mensagem'),
-    h('button', { class: 'btn', onclick: () => { close(); actions.ring(id); } }, '🔔 Chamar'));
-  el.append(acts);
-  placeNear(el, x + 12, y - 40);
+  showPopover(anchor, (el) => {
+    const pr = state.presence.get(id);
+    const isMe = id === state.me;
+    const room = pr?.room && state.rooms.get(pr.room);
+    el.append(h('div', { class: 'pop-head' }, avatar(id, 'lg', true), h('div', {},
+      h('div', { class: 'name' }, p.name),
+      h('span', { class: 'role-badge', style: `color:${ROLES[p.role].color}` }, ROLES[p.role].label),
+      h('div', { class: 'muted small', style: 'margin-top:4px' }, p.email))));
+    el.append(h('div', { class: 'pop-row muted' }, pr ? `${pr.statusText || STATUS_LABEL[pr.status]}${room ? ` · 🔊 ${room.name}` : ''}` : 'Offline'));
+    el.append(h('div', { class: 'menu-sep' }));
+    if (isMe) {
+      el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings(); } }, '⚙️ Editar perfil'));
+      return;
+    }
+    el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.selectView({ type: 'dm', id }); } }, '💬 Mensagem'));
+    if (pr && state.voiceRoom && pr.room !== state.voiceRoom) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.ring(id); } }, '🔔 Chamar para minha sala'));
+    if (pr?.room && pr.room !== state.voiceRoom && state.rooms.has(pr.room)) el.append(h('button', { class: 'menu-item', onclick: () => { closePopover(); A.joinVoice(pr.room); } }, `🔊 Entrar em ${room.name}`));
+    if (state.voiceRoom && pr?.room === state.voiceRoom) {
+      const range = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: getUserVolume(id) });
+      range.oninput = () => setUserVolume(id, Number(range.value));
+      el.append(h('div', { class: 'menu-label' }, 'Volume para você'), h('div', { class: 'pop-row' }, range));
+    }
+    if (canModerate(id) && pr?.room) {
+      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Moderação'),
+        h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'mute'); } }, '🔇 Mutar na sala'),
+        h('button', { class: 'menu-item', onclick: () => { closePopover(); A.moderate(id, 'unmute'); } }, '🎙️ Desmutar'),
+        h('button', { class: 'menu-item danger', onclick: () => { closePopover(); A.moderate(id, 'kick'); } }, '⏏ Remover da sala'));
+    }
+    if (myRank() === 3) {
+      const sel = h('select', { class: 'input' }, ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
+      sel.onchange = () => A.setRole(id, sel.value);
+      el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'menu-label' }, 'Cargo'), h('div', { class: 'pop-row' }, sel));
+    }
+  });
+}
+
+export function openStatusMenu(anchor) {
+  showPopover(anchor, (el) => {
+    const pr = state.presence.get(state.me) || {};
+    for (const s of ['available', 'busy', 'away']) {
+      el.append(h('button', { class: `menu-item${pr.status === s ? ' active' : ''}`, onclick: () => { A.setStatus(s, pr.statusText); closePopover(); } },
+        h('span', { class: `dot ${s}` }), s === 'busy' ? 'Ocupado — não perturbe' : STATUS_LABEL[s]));
+    }
+    const txt = h('input', { class: 'input', maxlength: 60, placeholder: 'Mensagem de status (Enter para salvar)', value: pr.statusText || '' });
+    txt.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { A.setStatus(pr.status || 'available', txt.value.trim()); closePopover(); } });
+    el.append(h('div', { class: 'menu-sep' }), h('div', { class: 'pop-row' }, txt), h('div', { class: 'menu-sep' }),
+      h('button', { class: 'menu-item', onclick: () => { closePopover(); openSettings(); } }, '⚙️ Configurações'),
+      h('button', { class: 'menu-item danger', onclick: () => A.logout() }, '🚪 Sair'));
+  }, 'above');
 }
 
 // ------------------------------------------------------------------ Toasts / som
-export function toast({ title, body, actions: acts = [], timeout = 7000 }) {
+export function toast({ title, body, actions = [], timeout = 7000 }) {
   const el = h('div', { class: 'toast' }, h('div', { class: 't-title' }, title), body ? h('div', { class: 't-body' }, body) : null);
   const close = () => el.remove();
-  if (acts.length) el.append(h('div', { class: 't-acts' }, acts.map((a) => h('button', { class: `btn${a.primary ? ' primary' : ''}`, onclick: () => { close(); a.onClick?.(); } }, a.label))));
+  if (actions.length) el.append(h('div', { class: 't-acts' }, actions.map((a) => h('button', { class: `btn${a.primary ? ' primary' : ''}`, onclick: () => { close(); a.onClick?.(); } }, a.label))));
   $('#toasts').append(el);
   while ($('#toasts').children.length > 4) $('#toasts').firstChild.remove();
   if (timeout) setTimeout(close, timeout);
 }
 
 let beepCtx;
-export function beep(freq = 880, dur = 0.12, times = 1) {
+export function beep(freqs = [880], dur = 0.1) {
   try {
     beepCtx ??= new AudioContext();
-    for (let i = 0; i < times; i++) {
+    freqs.forEach((f, i) => {
       const o = beepCtx.createOscillator(), g = beepCtx.createGain();
-      const t = beepCtx.currentTime + i * (dur + 0.08);
-      o.frequency.value = freq; o.type = 'sine';
+      const t = beepCtx.currentTime + i * (dur + 0.04);
+      o.frequency.value = f; o.type = 'sine';
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.15, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g).connect(beepCtx.destination);
       o.start(t); o.stop(t + dur + 0.02);
-    }
+    });
   } catch {}
 }
+export const sounds = {
+  join: () => beep([660, 880]),
+  leave: () => beep([880, 560]),
+  message: () => beep([740], 0.08),
+  ring: () => beep([880, 1100, 880, 1100], 0.14),
+};
 
 // ------------------------------------------------------------------ Spotlight
 export function openSpotlight(stream, title) {
@@ -378,87 +334,135 @@ export function openSpotlight(stream, title) {
 }
 export function closeSpotlight() { $('#spotlight').hidden = true; $('#spotlight video').srcObject = null; }
 
-// ------------------------------------------------------------------ Modal de configuração
-let draft = null;
-export function openSetup(mode) {
-  const modal = $('#setupModal');
-  const p = me();
-  const settings = mode === 'settings';
-  draft = { name: settings ? p.name : actions.profile().name, avatar: { ...(settings ? p.avatar : actions.profile().avatar) } };
-  $('#setupTitle').textContent = settings ? 'Configurações' : 'Bem-vindo ao Turbo Office';
-  $('#setupSub').textContent = settings ? 'Altere seu avatar, nome e dispositivos.' : 'Monte seu avatar e confira câmera e microfone antes de entrar.';
-  $('#setupGo').textContent = settings ? 'Salvar' : 'Entrar no escritório';
-  $('#setupCancel').hidden = !settings;
-  $('#nameInput').value = draft.name;
-  modal.hidden = false;
-  renderSwatches(); updatePreview(); fillDevices();
-
-  return new Promise((resolve) => {
-    $('#pvMic').onclick = async () => {
-      if (!local.mic) { local.micOn = true; await startMic(); } else { local.micOn = !local.micOn; local.mic.enabled = local.micOn; }
-      if (settings) publishMedia();
-      renderMediaButtons(); fillDevices();
-    };
-    $('#pvCam').onclick = async () => {
-      if (local.cam) stopCam(); else await startCam();
-      if (settings) publishMedia();
-      renderMediaButtons(); updatePreview(); fillDevices();
-    };
-    $('#micSelect').onchange = (e) => switchDevice('mic', e.target.value);
-    $('#camSelect').onchange = async (e) => { await switchDevice('cam', e.target.value); updatePreview(); };
-    $('#nameInput').oninput = (e) => (draft.name = e.target.value);
-    $('#nameInput').onkeydown = (e) => e.stopPropagation();
-    $('#setupCancel').onclick = () => { modal.hidden = true; $('#previewVideo').srcObject = null; resolve(null); };
-    $('#setupGo').onclick = () => {
-      const name = draft.name.trim();
-      if (!name) { $('#nameInput').focus(); return; }
-      modal.hidden = true;
-      $('#previewVideo').srcObject = null;
-      if (settings) actions.saveProfile(name, draft.avatar);
-      resolve({ name, avatar: draft.avatar });
-    };
-  });
-}
-
-export function refreshSetup() { updatePreview(); fillDevices(); }
-
-function updatePreview() {
-  const v = $('#previewVideo');
-  if (local.cam) { if (v.srcObject?.getVideoTracks()[0] !== local.cam) v.srcObject = new MediaStream([local.cam]); }
-  else v.srcObject = null;
-  $('.preview').classList.toggle('off', !local.cam);
-  renderMediaButtons();
-}
-
-function renderSwatches() {
-  const wrap = $('#swatches');
-  wrap.innerHTML = '';
-  const rows = [['skin', 'Pele'], ['hairStyle', 'Cabelo'], ['hair', 'Cor do cabelo'], ['shirt', 'Camiseta'], ['pants', 'Calça']];
-  for (const [key, label] of rows) {
-    const row = h('div', { class: 'sw-row' }, h('span', { class: 'lbl' }, label));
-    for (const v of AVATAR_OPTIONS[key]) {
-      const sel = draft.avatar[key] === v;
-      const b = key === 'hairStyle'
-        ? h('button', { class: `sw style${sel ? ' sel' : ''}`, type: 'button' }, HAIR_NAMES[v])
-        : h('button', { class: `sw${sel ? ' sel' : ''}`, type: 'button', style: `background:${v}`, title: v });
-      b.onclick = () => { draft.avatar[key] = v; renderSwatches(); };
-      row.append(b);
-    }
-    wrap.append(row);
+// ------------------------------------------------------------------ Modal: sala
+function roleOptions(select, current) {
+  select.innerHTML = '';
+  for (const r of ['membro', 'gestor', 'admin']) {
+    if (rank(r) > myRank()) continue;
+    select.append(h('option', { value: r, selected: r === current }, r === 'membro' ? 'Todos' : `${ROLES[r].label}s ou acima`));
   }
-  avatarPreview($('#avatarCanvas'), draft.avatar, 3.4);
+}
+
+export function openRoomModal(room, kind = 'voice') {
+  const modal = $('#roomModal');
+  const f = $('#roomForm');
+  $('#roomModalTitle').textContent = room ? `Editar ${room.kind === 'text' ? 'canal' : 'sala'}` : 'Criar sala';
+  f.kind.value = room?.kind || kind;
+  f.kind.disabled = !!room;
+  f.name.value = room?.name || '';
+  roleOptions(f.min_role, room?.min_role || 'membro');
+  roleOptions(f.write_role, room?.write_role || 'membro');
+  const syncKind = () => ($('#writeRoleField').hidden = f.kind.value !== 'text');
+  f.kind.onchange = syncKind; syncKind();
+  $('#roomError').textContent = '';
+  $('#roomDelete').hidden = !room;
+  $('#roomDelete').onclick = async () => {
+    if (!confirm(`Excluir "${room.name}"? ${room.kind === 'text' ? 'As mensagens deixam de aparecer.' : ''}`)) return;
+    const err = await A.deleteRoom(room.id);
+    if (err) $('#roomError').textContent = err; else modal.hidden = true;
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = { name: f.name.value.trim(), min_role: f.min_role.value, write_role: f.kind.value === 'text' ? f.write_role.value : 'membro' };
+    if (!data.name) return;
+    const err = room ? await A.updateRoom(room.id, data) : await A.createRoom({ ...data, kind: f.kind.value });
+    if (err) $('#roomError').textContent = err; else modal.hidden = true;
+  };
+  modal.hidden = false;
+  f.name.focus();
+}
+
+// ------------------------------------------------------------------ Modal: configurações
+let testStream = null;
+export function openSettings() {
+  const modal = $('#settingsModal');
+  const p = myProfile();
+  const draft = { name: p.name, color: p.color };
+  const nameInput = $('#setName');
+  nameInput.value = draft.name;
+  $('#setEmail').textContent = `${p.email} · ${ROLES[p.role].label}`;
+  $('#setError').textContent = '';
+  const refresh = () => {
+    const av = $('#setAvatar');
+    av.style.background = draft.color;
+    av.textContent = initials(draft.name);
+    $('#setPreviewName').textContent = draft.name || '—';
+    const sw = $('#colorSwatches');
+    sw.innerHTML = '';
+    for (const c of COLORS) sw.append(h('button', { class: `sw${c === draft.color ? ' sel' : ''}`, type: 'button', style: `background:${c}`, onclick: () => { draft.color = c; refresh(); } }));
+  };
+  nameInput.oninput = () => { draft.name = nameInput.value; refresh(); };
+  refresh();
+
+  const preview = $('#camPreview');
+  const stopTest = () => { testStream?.getTracks().forEach((t) => t.stop()); testStream = null; preview.querySelector('video').srcObject = null; preview.classList.add('off'); $('#testCam').textContent = 'Testar câmera'; };
+  $('#testCam').onclick = async () => {
+    if (testStream) return stopTest();
+    try {
+      testStream = await navigator.mediaDevices.getUserMedia({ video: local.camDeviceId ? { deviceId: { exact: local.camDeviceId } } : true });
+      preview.querySelector('video').srcObject = testStream;
+      preview.classList.remove('off');
+      $('#testCam').textContent = 'Parar teste';
+      fillDevices();
+    } catch { $('#setError').textContent = 'Não foi possível acessar a câmera.'; }
+  };
+  $('#micSelect').onchange = (e) => switchDevice('mic', e.target.value);
+  $('#camSelect').onchange = async (e) => { await switchDevice('cam', e.target.value); if (testStream) { stopTest(); $('#testCam').click(); } };
+  const close = () => { stopTest(); modal.hidden = true; };
+  modal.querySelector('[data-close]').onclick = close;
+  $('#setSave').onclick = async () => {
+    const name = draft.name.trim();
+    if (!name) { $('#setError').textContent = 'Informe seu nome.'; return; }
+    const err = await A.saveProfile({ name, color: draft.color });
+    if (err) $('#setError').textContent = err; else close();
+  };
+  fillDevices();
+  modal.hidden = false;
 }
 
 async function fillDevices() {
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
-    for (const [sel, kind, current] of [['#micSelect', 'audioinput', local.mic?.getSettings().deviceId], ['#camSelect', 'videoinput', local.cam?.getSettings().deviceId || local.camDeviceId]]) {
+    for (const [sel, kind, current] of [['#micSelect', 'audioinput', local.micDeviceId], ['#camSelect', 'videoinput', local.camDeviceId]]) {
       const el = $(sel);
       const list = devs.filter((d) => d.kind === kind);
       el.innerHTML = '';
-      if (!list.length || !list[0].label) { el.append(h('option', {}, list.length ? 'Permita o acesso para listar' : 'Nenhum dispositivo')); continue; }
+      if (!list.length || !list[0].label) { el.append(h('option', { value: '' }, list.length ? 'Permita o acesso para listar' : 'Nenhum dispositivo')); continue; }
       list.forEach((d, i) => el.append(h('option', { value: d.deviceId }, d.label || `Dispositivo ${i + 1}`)));
-      if (current) el.value = current;
+      if (current && list.some((d) => d.deviceId === current)) el.value = current;
     }
   } catch {}
 }
+
+// ------------------------------------------------------------------ Modal: admin (membros e cargos)
+export function openAdmin() {
+  const modal = $('#adminModal');
+  const search = $('#adminSearch');
+  const render = () => {
+    const term = search.value.trim().toLowerCase();
+    const list = $('#adminList');
+    list.innerHTML = '';
+    const people = [...state.profiles.values()]
+      .filter((p) => !term || p.name.toLowerCase().includes(term) || p.email.includes(term))
+      .sort((a, b) => rank(b.role) - rank(a.role) || a.name.localeCompare(b.name));
+    for (const p of people) {
+      const sel = h('select', { class: 'input', disabled: p.id === state.me || myRank() < 3 }, ['membro', 'gestor', 'admin'].map((r) => h('option', { value: r, selected: p.role === r }, ROLES[r].label)));
+      sel.onchange = async () => { const err = await A.setRole(p.id, sel.value); if (err) { toast({ title: 'Não foi possível mudar o cargo', body: err }); sel.value = p.role; } };
+      list.append(h('div', { class: 'admin-row' }, avatar(p.id, 'sm', true), h('div', { style: 'min-width:0' }, h('div', { class: 'nm' }, p.name + (p.id === state.me ? ' (você)' : '')), h('div', { class: 'em' }, p.email)), sel));
+    }
+  };
+  search.oninput = render;
+  modal.querySelector('[data-close]').onclick = () => (modal.hidden = true);
+  render();
+  modal.hidden = false;
+}
+
+// Fecha popovers/modais ao clicar fora
+document.addEventListener('pointerdown', (e) => {
+  const pop = $('#popover');
+  if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+});
+document.querySelectorAll('.modal').forEach((m) => m.addEventListener('pointerdown', (e) => {
+  if (e.target === m && m.id !== 'kicked') { if (m.id === 'settingsModal') m.querySelector('[data-close]').click(); else m.hidden = true; }
+}));
+document.querySelectorAll('#roomModal [data-close]').forEach((b) => (b.onclick = () => ($('#roomModal').hidden = true)));

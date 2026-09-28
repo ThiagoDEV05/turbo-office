@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turbo Office</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="app-body">
+  <div id="loading" class="loading"><img src="/favicon.svg" alt="" width="48" height="48"><p id="loadingText">Carregando Turbo Office…</p></div>
+
+  <div id="layout" class="layout" hidden>
+    <!-- Coluna esquerda: canais -->
+    <aside id="left">
+      <header class="server-head">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        <span class="server-name">Turbo Partners</span>
+        <button class="icon-btn" id="adminBtn" title="Membros e cargos" hidden>⚙</button>
+      </header>
+      <nav id="channelList" class="scroll"></nav>
+
+      <div id="voicePanel" hidden>
+        <div class="vp-info">
+          <span class="vp-status" id="vpStatus">Voz conectada</span>
+          <span class="vp-room" id="vpRoom"></span>
+        </div>
+        <button class="icon-btn danger" id="vpLeave" title="Sair da sala">⏏</button>
+      </div>
+
+      <div id="userPanel">
+        <button id="meBtn" class="me-btn" title="Status e perfil">
+          <span class="avatar sm" id="meAvatar"></span>
+          <span class="me-info"><span class="me-name" id="meName"></span><span class="me-status" id="meStatus"></span></span>
+        </button>
+        <button class="ctl sm" id="micBtn" title="Microfone (Ctrl+Shift+A)"></button>
+        <button class="ctl sm" id="deafBtn" title="Desativar áudio (Ctrl+Shift+D)"></button>
+        <button class="ctl sm" id="settingsBtn" title="Configurações"></button>
+      </div>
+    </aside>
+
+    <!-- Centro -->
+    <main id="main">
+      <header id="mainHead">
+        <button class="icon-btn" id="navToggle" title="Canais">☰</button>
+        <span id="mainIcon" class="main-icon"></span>
+        <h1 id="mainTitle"></h1>
+        <span id="mainSub" class="muted"></span>
+        <span class="spacer"></span>
+        <button class="icon-btn" id="membersToggle" title="Membros"></button>
+      </header>
+
+      <section id="textView" class="view" hidden>
+        <div id="messages" class="scroll"></div>
+        <form id="composer">
+          <input id="msgInput" class="input" maxlength="2000" autocomplete="off">
+          <button class="btn primary" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <section id="voiceView" class="view" hidden>
+        <div id="voiceLobby">
+          <div class="lobby-card">
+            <div class="lobby-icon">🔊</div>
+            <h2 id="lobbyTitle"></h2>
+            <div id="lobbyPeople"></div>
+            <button class="btn primary" id="lobbyJoin">Entrar na sala</button>
+          </div>
+        </div>
+        <div id="stage"></div>
+        <div id="callBar">
+          <button class="ctl" id="cMic" title="Microfone (Ctrl+Shift+A)"></button>
+          <button class="ctl" id="cCam" title="Câmera (Ctrl+Shift+V)"></button>
+          <button class="ctl" id="cScreen" title="Compartilhar tela"></button>
+          <button class="ctl" id="cDeaf" title="Desativar áudio (Ctrl+Shift+D)"></button>
+          <button class="ctl danger" id="cLeave" title="Sair da sala"></button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Coluna direita: membros -->
+    <aside id="right">
+      <div id="memberList" class="scroll"></div>
+    </aside>
+  </div>
+
+  <div id="popover" class="popover" hidden></div>
+  <div id="toasts"></div>
+
+  <div id="spotlight" hidden>
+    <div class="spot-inner">
+      <video autoplay playsinline muted></video>
+      <div class="spot-bar"><span id="spotTitle"></span><button class="btn" id="spotClose">Fechar (Esc)</button></div>
+    </div>
+  </div>
+
+  <!-- Criar/editar sala -->
+  <div id="roomModal" class="modal" hidden>
+    <form class="modal-card narrow" id="roomForm">
+      <h2 id="roomModalTitle">Criar sala</h2>
+      <label class="field"><span>Tipo</span>
+        <select class="input" name="kind"><option value="voice">🔊 Sala de voz/vídeo</option><option value="text"># Canal de texto</option></select>
+      </label>
+      <label class="field"><span>Nome</span><input class="input" name="name" maxlength="40" required></label>
+      <label class="field"><span>Quem pode ver e entrar</span><select class="input" name="min_role"></select></label>
+      <label class="field" id="writeRoleField"><span>Quem pode escrever</span><select class="input" name="write_role"></select></label>
+      <p class="error" id="roomError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn danger-outline" id="roomDelete" hidden>Excluir</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Cancelar</button>
+        <button type="submit" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Configurações do perfil e dispositivos -->
+  <div id="settingsModal" class="modal" hidden>
+    <div class="modal-card settings">
+      <div>
+        <h2>Configurações</h2>
+        <label class="field"><span>Seu nome</span><input class="input" id="setName" maxlength="32"></label>
+        <div class="field"><span>Cor do avatar</span><div id="colorSwatches" class="swatches"></div></div>
+        <div class="set-preview"><span class="avatar lg" id="setAvatar"></span><div><div id="setPreviewName" class="strong"></div><div class="muted small" id="setEmail"></div></div></div>
+      </div>
+      <div>
+        <div class="preview off" id="camPreview"><video autoplay playsinline muted></video><div class="preview-off">Câmera desligada</div></div>
+        <button class="btn block" id="testCam" type="button">Testar câmera</button>
+        <label class="field"><span>Microfone</span><select id="micSelect" class="input"></select></label>
+        <label class="field"><span>Câmera</span><select id="camSelect" class="input"></select></label>
+      </div>
+      <div class="modal-actions full">
+        <p class="error" id="setError"></p>
+        <span class="spacer"></span>
+        <button class="btn" data-close>Cancelar</button>
+        <button class="btn primary" id="setSave">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin: membros e cargos -->
+  <div id="adminModal" class="modal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-top"><h2>Membros e cargos</h2><button class="icon-btn" data-close>✕</button></div>
+      <p class="muted small">Admin: gerencia cargos, salas e modera todos. Gestor: cria/edita salas e muta ou remove Membros das salas de voz. Membro: uso normal.</p>
+      <input class="input" id="adminSearch" placeholder="Buscar por nome ou e-mail…">
+      <div id="adminList" class="scroll"></div>
+    </div>
+  </div>
+
+  <div id="kicked" class="modal" hidden>
+    <div class="modal-card narrow center">
+      <h2>Turbo Office aberto em outra aba</h2>
+      <p class="muted">Só uma aba por pessoa pode ficar ativa.</p>
+      <button class="btn primary" onclick="location.reload()">Usar aqui</button>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
