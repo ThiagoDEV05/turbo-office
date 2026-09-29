@@ -78,7 +78,7 @@ on('db:messages', (p) => {
       if (m.channel.startsWith('dm:')) {
         sounds.message();
         toast({ title: displayName(m.from), body: m.text, actions: [{ label: 'Responder', primary: true, onClick: () => emit('open-view', { type: 'dm', id: m.from }) }] });
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(`${displayName(m.from)} · Turbo Office`, { body: m.text.slice(0, 120) });
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(`${displayName(m.from)} · TurboFlow`, { body: m.text.slice(0, 120) });
       }
     }
     emit('unread');

@@ -1187,7 +1187,7 @@ let srvTab = 'members';
 export function openServerSettings(tab = srvTab) {
   const modal = $('#serverModal');
   srvTab = tab;
-  $('#srvTitle').textContent = state.cfg?.serverName || 'Turbo Office';
+  $('#srvTitle').textContent = state.cfg?.serverName || 'TurboFlow';
   const headings = { members: 'Membros', bans: 'Banimentos', roles: 'Cargos e permissões' };
   modal.querySelectorAll('.srv-tab').forEach((b) => {
     b.classList.toggle('active', b.dataset.tab === tab);

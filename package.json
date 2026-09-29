@@ -1,7 +1,7 @@
 {
-  "name": "turbo-office",
+  "name": "turboflow",
   "version": "2.0.0",
-  "description": "Turbo Office — salas de voz/vídeo, canais de texto e cargos para o time da Turbo Partners. Vercel + Supabase.",
+  "description": "TurboFlow — salas de voz/vídeo, canais de texto e cargos para o time da Turbo Partners. Vercel + Supabase.",
   "type": "module",
   "private": true,
   "scripts": {

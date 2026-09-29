@@ -1,5 +1,5 @@
 -- =====================================================================
--- Turbo Office — schema do Supabase
+-- TurboFlow — schema do Supabase
 -- Rode este arquivo inteiro no Supabase: SQL Editor → New query → Run.
 -- Pode rodar de novo sem problema (é idempotente).
 -- =====================================================================

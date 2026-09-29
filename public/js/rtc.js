@@ -286,7 +286,7 @@ export async function toggleScreen(opts) {
   if (local.screen) { stopScreen(); return false; }
   const q = { ...getScreenQuality(), ...(opts || {}) };
   const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
-  // Continua no Turbo Office ao escolher uma aba/janela (o Chrome pularia para ela por padrão)
+  // Continua no TurboFlow ao escolher uma aba/janela (o Chrome pularia para ela por padrão)
   let controller = null;
   try {
     controller = typeof CaptureController !== 'undefined' ? new CaptureController() : null;

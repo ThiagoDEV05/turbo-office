@@ -424,7 +424,7 @@ function bindEvents() {
         { label: 'Mensagem', onClick: () => selectView({ type: 'dm', id: from }) },
       ].filter(Boolean),
     });
-    if (document.hidden && !busy && 'Notification' in window && Notification.permission === 'granted') new Notification(`${displayName(from)} está te chamando no Turbo Office`);
+    if (document.hidden && !busy && 'Notification' in window && Notification.permission === 'granted') new Notification(`${displayName(from)} está te chamando no TurboFlow`);
   });
   on('kicked', () => { leaveVoice(true); stopNet(); $('#kicked').hidden = false; });
 
@@ -519,8 +519,8 @@ async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return location.replace('/login');
   state.me = session.user.id;
-  $('#serverName').textContent = state.cfg.serverName || 'Turbo Office';
-  document.title = state.cfg.serverName ? `${state.cfg.serverName} · Turbo Office` : 'Turbo Office';
+  $('#serverName').textContent = state.cfg.serverName || 'TurboFlow';
+  document.title = state.cfg.serverName ? `${state.cfg.serverName} · TurboFlow` : 'TurboFlow';
   sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') location.replace('/login'); });
 
   const { data: profiles, error } = await sb.from('profiles').select('id, email, name, color, role, avatar_url, bio, pronouns, banner_color, banner_color2, banner_url, name_color, decoration, created_at');
