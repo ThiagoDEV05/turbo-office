@@ -118,22 +118,49 @@ const micLive = () => !!(local.mic && local.micOn && !state.modMuted && !state.d
 
 // ------------------------------------------------------------------ Mídia local
 export async function startMic() {
+  const open = (deviceId) => navigator.mediaDevices.getUserMedia({
+    audio: { deviceId: deviceId ? { exact: deviceId } : undefined, ...getAudioProcessing(), sampleRate: 48000, channelCount: 1 },
+  });
   try {
-    const s = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: local.micDeviceId ? { exact: local.micDeviceId } : undefined, ...getAudioProcessing(), sampleRate: 48000, channelCount: 1 },
-    });
+    let s;
+    try {
+      s = await open(local.micDeviceId);
+    } catch (e) {
+      // O microfone escolhido sumiu (fone desconectado, ID mudou): usa o padrão do computador
+      if (!local.micDeviceId || e.name === 'NotAllowedError') throw e;
+      console.warn('Microfone escolhido indisponível; usando o padrão', e);
+      local.micDeviceId = undefined;
+      localStorage.removeItem('to.mic');
+      s = await open(undefined);
+      emit('mic-fallback');
+    }
     local.mic?.stop();
     local.mic = s.getAudioTracks()[0];
     local.mic.enabled = micLive();
+    // Se o microfone cair no meio da chamada (fone desconectado, Bluetooth), reabre sozinho
+    const track = local.mic;
+    track.addEventListener('ended', () => {
+      if (local.mic !== track || !state.voiceRoom) return;
+      console.warn('Microfone desconectado; reabrindo');
+      local.mic = null;
+      publishMedia();
+      setTimeout(() => { if (!local.mic && state.voiceRoom && local.micOn) startMic().then(() => publishMedia()); }, 800);
+    });
     replaceAll(0, local.mic);
     watchSpeaking(state.me, new MediaStream([local.mic]));
+    emit('media-local');
     return true;
   } catch (e) {
     console.warn('Microfone indisponível', e);
     local.mic = null;
+    emit('mic-error', e);
+    emit('media-local');
     return false;
   }
 }
+
+// O microfone está realmente funcionando? (ligado E aberto)
+export const micWorking = () => micLive();
 
 // Câmera: local.camRaw é a câmera de verdade; local.cam é o que vai para os outros
 // (a própria câmera, ou o vídeo com fundo virtual aplicado).
@@ -212,6 +239,12 @@ function applyMic() { if (local.mic) local.mic.enabled = micLive(); }
 
 export async function toggleMic() {
   if (state.modMuted) return false;
+  // Microfone "ligado" mas não abriu (bloqueado/desconectado): o clique tenta abrir de novo
+  if (state.voiceRoom && local.micOn && !local.mic && !state.deafened) {
+    await startMic();
+    publishMedia();
+    return !!local.mic;
+  }
   if (state.deafened) { state.deafened = false; applyDeaf(); local.micOn = true; }
   else local.micOn = !local.micOn;
   localStorage.setItem('to.micOn', local.micOn ? '1' : '0');

@@ -304,15 +304,20 @@ export function renderUserPanel() {
 
 export function renderControls() {
   const inRoom = !!state.voiceRoom;
-  const micOn = !!(local.micOn && !state.modMuted && !state.deafened);
+  // Na sala, "ligado" só se o microfone abriu de verdade (senão os outros não ouvem)
+  const micBroken = !!state.voiceRoom && local.micOn && !local.mic && !state.deafened && !state.modMuted;
+  const micOn = !!(local.micOn && !state.modMuted && !state.deafened && !micBroken);
   const set = (sel, on_, onIcon, offIcon, title) => {
     const b = $(sel);
     b.innerHTML = on_ ? onIcon : offIcon;
     b.classList.toggle('off', !on_);
     if (title) b.title = title;
   };
-  set('#micBtn', micOn, icons.mic, icons.micOff, state.modMuted ? 'Mutado por um Gestor/Admin' : 'Microfone (Ctrl+Shift+A)');
-  set('#cMic', micOn, icons.mic, icons.micOff, state.modMuted ? 'Mutado por um Gestor/Admin' : 'Microfone (Ctrl+Shift+A)');
+  const micTitle = state.modMuted ? 'Mutado por um Gestor/Admin' : micBroken ? 'O microfone não abriu — clique para tentar de novo' : 'Microfone (Ctrl+Shift+A)';
+  set('#micBtn', micOn, icons.mic, icons.micOff, micTitle);
+  set('#cMic', micOn, icons.mic, icons.micOff, micTitle);
+  $('#micBtn').classList.toggle('broken', micBroken);
+  $('#cMic').classList.toggle('broken', micBroken);
   $('#micBtn').disabled = $('#cMic').disabled = state.modMuted;
   set('#deafBtn', !state.deafened, icons.head, icons.headOff);
   set('#cDeaf', !state.deafened, icons.head, icons.headOff);

@@ -459,6 +459,13 @@ function bindEvents() {
   $('#adminBtn').onclick = () => ui.openServerSettings();
   $('#serverName').onclick = () => { if (myRank() >= 2) ui.openServerSettings(); };
   $('#composer').onsubmit = (e) => { e.preventDefault(); chat.sendMessage(); };
+  on('mic-fallback', () => ui.toast({ title: '🎙️ Microfone trocado para o padrão', body: 'O microfone que você tinha escolhido não foi encontrado (fone desconectado?). Troque na setinha ao lado do microfone se quiser.' }));
+  on('mic-error', (e) => {
+    if (!state.voiceRoom) return;
+    const blocked = e?.name === 'NotAllowedError';
+    ui.toast({ title: '🎙️ Seu microfone não abriu', body: blocked ? 'O navegador bloqueou o microfone. Clique no cadeado ao lado do endereço do site e permita o microfone.' : 'Nenhum microfone encontrado ou ele está em uso por outro app. Clique no botão do microfone para tentar de novo.', timeout: 10000 });
+    ui.renderControls();
+  });
   $('#cCamBg').onclick = (e) => { e.stopPropagation(); ui.openBackgroundMenu(e.currentTarget); };
   on('bg-error', () => ui.toast({ title: 'Fundo virtual indisponível', body: 'Não consegui carregar o recorte de fundo neste navegador. A câmera continua normal. Use o Chrome ou o Edge atualizados.' }));
   $('#vcComposer').onsubmit = (e) => { e.preventDefault(); chat.sendVoiceMessage(); };
