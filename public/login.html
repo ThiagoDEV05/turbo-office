@@ -19,7 +19,7 @@
       </div>
     </div>
 
-    <div class="tabs" role="tablist">
+    <div class="tabs" role="tablist" id="tabs">
       <button class="tab active" data-mode="login" role="tab">Entrar</button>
       <button class="tab" data-mode="register" role="tab">Criar conta</button>
     </div>
@@ -29,18 +29,20 @@
         <span>Nome</span>
         <input name="name" class="input" autocomplete="name" maxlength="32" placeholder="Como o time te chama">
       </label>
-      <label class="field">
+      <label class="field" id="emailField">
         <span>E-mail da Turbo</span>
         <input name="email" class="input" type="email" autocomplete="email" required placeholder="voce@turbopartners.com.br">
       </label>
-      <label class="field">
-        <span>Senha</span>
+      <label class="field" id="passwordField">
+        <span id="passwordLabel">Senha</span>
         <input name="password" class="input" type="password" autocomplete="current-password" required minlength="8" placeholder="••••••••">
       </label>
       <p class="error" id="error" role="alert"></p>
       <div class="notice" id="notice" hidden></div>
       <button class="btn primary block" type="submit" id="submitBtn">Entrar</button>
     </form>
+    <button class="auth-link" type="button" id="forgotLink">Esqueci minha senha</button>
+    <button class="auth-link" type="button" id="backLink" hidden>Voltar para entrar</button>
     <p class="muted small center" id="domainHint">Acesso exclusivo para e-mails da Turbo Partners</p>
   </main>
 
@@ -62,29 +64,46 @@
       if (/already registered|already been registered/i.test(msg)) return 'Esse e-mail já tem conta. Use a aba Entrar.';
       if (/database error saving new user|DOMINIO/i.test(msg)) return 'Apenas e-mails da Turbo Partners podem criar conta.';
       if (/password should be at least/i.test(msg)) return 'A senha precisa ter pelo menos 8 caracteres.';
-      if (/rate limit/i.test(msg)) return 'Muitas tentativas. Aguarde alguns minutos.';
+      if (/rate limit|security purposes/i.test(msg)) return 'Muitas tentativas. Aguarde alguns minutos.';
+      if (/different from the old password/i.test(msg)) return 'A nova senha precisa ser diferente da anterior.';
+      if (/session missing|expired|invalid.*token/i.test(msg)) return 'O link expirou. Peça um novo em "Esqueci minha senha".';
       return msg || 'Não foi possível continuar.';
     };
+
+    // Link "redefinir senha" do e-mail volta pra cá com #...type=recovery (lido antes do Supabase limpar a URL)
+    const recovering = /type=recovery/.test(location.hash);
 
     let sb, cfg;
     try {
       [sb, cfg] = await Promise.all([getSupabase(), getConfig()]);
       document.getElementById('domainHint').textContent = `Acesso exclusivo para e-mails ${cfg.allowedDomains.map((d) => '@' + d).join(' ou ')}`;
       const { data } = await sb.auth.getSession();
-      if (data.session) location.replace('/');
+      if (data.session && !recovering) location.replace('/');
     } catch (e) {
       err.textContent = e.message;
       submitBtn.disabled = true;
     }
 
-    document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-      mode = t.dataset.mode;
-      document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-      document.getElementById('nameField').hidden = mode !== 'register';
-      submitBtn.textContent = mode === 'register' ? 'Criar conta' : 'Entrar';
-      form.password.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+    // Modos: login | register | forgot (pede o link por e-mail) | reset (define a nova senha)
+    const setMode = (m) => {
+      mode = m;
+      document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.mode === m));
+      document.getElementById('tabs').hidden = m === 'forgot' || m === 'reset';
+      document.getElementById('nameField').hidden = m !== 'register';
+      document.getElementById('emailField').hidden = m === 'reset';
+      document.getElementById('passwordField').hidden = m === 'forgot';
+      document.getElementById('passwordLabel').textContent = m === 'reset' ? 'Nova senha' : 'Senha';
+      document.getElementById('forgotLink').hidden = m !== 'login';
+      document.getElementById('backLink').hidden = m !== 'forgot';
+      submitBtn.textContent = { login: 'Entrar', register: 'Criar conta', forgot: 'Enviar link de redefinição', reset: 'Salvar nova senha' }[m];
+      form.password.autocomplete = m === 'login' ? 'current-password' : 'new-password';
       err.textContent = ''; notice.hidden = true;
-    }));
+    };
+
+    document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setMode(t.dataset.mode)));
+    document.getElementById('forgotLink').addEventListener('click', () => setMode('forgot'));
+    document.getElementById('backLink').addEventListener('click', () => setMode('login'));
+    if (recovering) setMode('reset');
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -92,12 +111,22 @@
       const email = form.email.value.trim().toLowerCase();
       const password = form.password.value;
       const name = form.name.value.trim();
-      if (!cfg.allowedDomains.includes(email.split('@')[1] || '')) { err.textContent = `Use seu e-mail ${cfg.allowedDomains.map((d) => '@' + d).join(' ou ')}.`; return; }
-      if (password.length < 8) { err.textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+      if (mode !== 'reset' && !cfg.allowedDomains.includes(email.split('@')[1] || '')) { err.textContent = `Use seu e-mail ${cfg.allowedDomains.map((d) => '@' + d).join(' ou ')}.`; return; }
+      if (mode !== 'forgot' && password.length < 8) { err.textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
       if (mode === 'register' && !name) { err.textContent = 'Informe seu nome.'; return; }
       submitBtn.disabled = true;
       try {
-        if (mode === 'register') {
+        if (mode === 'forgot') {
+          const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/login' });
+          if (error) throw error;
+          notice.textContent = `Se ${email} tiver conta, enviamos um link para redefinir a senha. Confira a caixa de entrada (e o spam).`;
+          notice.hidden = false;
+          return;
+        }
+        if (mode === 'reset') {
+          const { error } = await sb.auth.updateUser({ password });
+          if (error) throw error;
+        } else if (mode === 'register') {
           const color = COLORS[Math.floor(Math.random() * COLORS.length)];
           const { data, error } = await sb.auth.signUp({ email, password, options: { data: { name, color }, emailRedirectTo: location.origin + '/' } });
           if (error) throw error;

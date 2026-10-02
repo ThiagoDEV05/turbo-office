@@ -511,6 +511,8 @@ function fail(msg) {
 }
 
 async function boot() {
+  // Link de redefinir senha caiu aqui (Site URL do Supabase): manda pra tela de nova senha
+  if (/type=recovery/.test(location.hash)) return location.replace('/login' + location.hash);
   try {
     sb = await getSupabase();
     state.cfg = await getConfig();
