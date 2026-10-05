@@ -445,7 +445,7 @@ function bindEvents() {
   $('#micBtn').onclick = $('#cMic').onclick = toggleMic;
   $('#deafBtn').onclick = $('#cDeaf').onclick = toggleDeaf;
   $('#cCam').onclick = toggleCam;
-  // Transmite direto com a qualidade padrão (4K 60fps com som); ajuste só em Configurações → Voz e vídeo
+  // Transmite direto em 1080p 30fps; o som junto se ajusta em Configurações → Voz e vídeo
   $('#cScreen').onclick = async () => {
     if (rtc.local.screen) { await rtc.toggleScreen(); ui.renderControls(); return; }
     actions.startScreen(rtc.getScreenQuality());

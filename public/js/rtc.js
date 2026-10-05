@@ -11,16 +11,14 @@ const SLOTS = ['audio', 'cam', 'screen', 'screenAudio'];
 const KINDS = ['audio', 'video', 'video', 'audio'];
 const NSLOTS = SLOTS.length;
 
-// ---------------------------------------------------------------- Qualidade (tudo liberado)
+// ---------------------------------------------------------------- Qualidade
+// Tela fixa em 1080p a 30 fps para todo mundo (4K/60 fps borrava: faltava banda e CPU e o texto perdia nitidez)
 export const SCREEN_PRESETS = {
-  '720': { label: '720p', w: 1280, h: 720, bitrate: 2_500_000 },
   '1080': { label: '1080p', w: 1920, h: 1080, bitrate: 6_000_000 },
-  '1440': { label: '1440p', w: 2560, h: 1440, bitrate: 10_000_000 },
-  '4k': { label: '4K', w: 3840, h: 2160, bitrate: 18_000_000 },
 };
 const readJSON = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
-// Padrão para todo mundo: 4K a 60 fps com som (cada um pode baixar se a rede não aguentar)
-export const getScreenQuality = () => readJSON('to.screenq2', { res: '4k', fps: 60, audio: true });
+// Só o som é escolha de cada um; resolução e fps salvos de versões antigas são ignorados
+export const getScreenQuality = () => ({ ...readJSON('to.screenq2', { audio: true }), res: '1080', fps: 30 });
 export const setScreenQuality = (patch) => localStorage.setItem('to.screenq2', JSON.stringify({ ...getScreenQuality(), ...patch }));
 export const getAudioProcessing = () => readJSON('to.audio', { noiseSuppression: true, echoCancellation: true, autoGainControl: true });
 export async function setAudioProcessing(patch) {
@@ -70,7 +68,6 @@ function tunePeer(peer) {
   const ts = peer.pc.getTransceivers();
   const q = getScreenQuality();
   const preset = SCREEN_PRESETS[q.res] || SCREEN_PRESETS['1080'];
-  const fpsBoost = q.fps >= 60 ? 1.6 : q.fps <= 15 ? 0.7 : 1;
   // Conexão passando pelo servidor TURN (retransmitida): usa menos dados para a cota grátis durar.
   // Voz continua igual; câmera 1 Mbps; tela até ~1080p (4 Mbps) a no máximo 30 fps.
   const relayed = !!peer.relayed;
@@ -78,11 +75,11 @@ function tunePeer(peer) {
   if (ts[1]) setEncoding(ts[1].sender, { maxBitrate: relayed ? 1_000_000 : 2_500_000, maxFramerate: 30 });
   // Banda total de upload para a tela (~40 Mbps) dividida entre quem está assistindo, mínimo 4 Mbps cada
   const viewers = Math.max(1, peers.size);
-  let screenBitrate = Math.min(preset.bitrate * fpsBoost, Math.max(4_000_000, 40_000_000 / viewers));
+  let screenBitrate = Math.min(preset.bitrate, Math.max(4_000_000, 40_000_000 / viewers));
   if (relayed) screenBitrate = Math.min(screenBitrate, 4_000_000);
-  const fps = relayed ? Math.min(q.fps, 30) : q.fps;
-  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(screenBitrate), maxFramerate: fps, priority: 'high' },
-    { degradationPreference: fps >= 60 ? 'maintain-framerate' : 'maintain-resolution' });
+  // Se a rede apertar, perde fluidez e não nitidez (texto continua legível)
+  if (ts[2]) setEncoding(ts[2].sender, { maxBitrate: Math.round(screenBitrate), maxFramerate: q.fps, priority: 'high' },
+    { degradationPreference: 'maintain-resolution' });
   if (ts[3]) setEncoding(ts[3].sender, { maxBitrate: 256_000 });
 }
 
@@ -302,7 +299,7 @@ export async function toggleScreen(opts) {
     // Navegadores mais antigos só aceitam a escolha logo depois da captura começar
     try { controller?.setFocusBehavior?.('no-focus-change'); } catch {}
     local.screen = s.getVideoTracks()[0];
-    local.screen.contentHint = q.fps >= 60 ? 'motion' : 'detail';
+    local.screen.contentHint = 'detail';
     local.screen.onended = stopScreen;
     local.screenAudio = s.getAudioTracks()[0] || null;
     if (local.screenAudio) local.screenAudio.contentHint = 'music';

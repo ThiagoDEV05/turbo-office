@@ -5,7 +5,7 @@ import {
 } from './state.js';
 import {
   local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
-  getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality, SCREEN_PRESETS,
+  getAudioProcessing, setAudioProcessing, getScreenQuality, setScreenQuality,
   isLocalMuted, setLocalMute, getStreamVolume, setStreamVolume, isStreamMuted, setStreamMuted, setCameraBackground,
 } from './rtc.js';
 import { THEMES, GRADIENTS, ACCENTS, getPrefs, applyPrefs } from './prefs.js';
@@ -889,16 +889,6 @@ async function renderVoiceTab(box) {
   const paintBg = () => { bgBox.innerHTML = ''; bgBox.append(backgroundGrid(paintBg)); };
   paintBg();
 
-  const qRes = h('div', { class: 'quality-grid' });
-  const qFps = h('div', { class: 'fps-grid' });
-  const paintQ = () => {
-    const cur = getScreenQuality();
-    qRes.innerHTML = ''; qFps.innerHTML = '';
-    for (const [k, v] of Object.entries(SCREEN_PRESETS)) qRes.append(h('button', { class: `btn${cur.res === k ? ' sel' : ''}`, type: 'button', onclick: () => { setScreenQuality({ res: k }); paintQ(); } }, v.label));
-    for (const f of [15, 30, 60]) qFps.append(h('button', { class: `btn${cur.fps === f ? ' sel' : ''}`, type: 'button', onclick: () => { setScreenQuality({ fps: f }); paintQ(); } }, `${f} fps`));
-  };
-  paintQ();
-
   box.append(h('div', { class: 'set-grid' },
     h('div', {},
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Microfone'), micSel, meter, h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Fale algo: a barra verde mostra o volume que chega no microfone.')),
@@ -908,9 +898,9 @@ async function renderVoiceTab(box) {
         switchRow('Supressão de ruído', 'Corta barulho de fundo (teclado, ventilador, rua).', audio.noiseSuppression, (v) => setAudioProcessing({ noiseSuppression: v })),
         switchRow('Cancelamento de eco', 'Evita que o som das caixas volte pelo microfone.', audio.echoCancellation, (v) => setAudioProcessing({ echoCancellation: v })),
         switchRow('Ganho automático', 'Ajusta o volume da sua voz sozinho.', audio.autoGainControl, (v) => setAudioProcessing({ autoGainControl: v }))),
-      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Qualidade padrão ao transmitir a tela'), qRes, h('div', { style: 'height:8px' }), qFps,
+      h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Transmissão de tela'),
         switchRow('Transmitir o som junto', 'Manda o som da aba ou do sistema junto com a tela.', q.audio !== false, (v) => setScreenQuality({ audio: v })),
-        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'Padrão: 4K a 60 fps com som. O botão de transmitir já usa essa qualidade direto. Se a sua internet não aguentar, baixe aqui.'))),
+        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'A tela é transmitida em 1080p a 30 fps para todos, a qualidade que deixa texto e planilhas mais nítidos.'))),
     h('div', {},
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn),
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Fundo da câmera'), bgBox))));
