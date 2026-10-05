@@ -315,23 +315,23 @@ create policy mod_read on public.mod_actions for select to authenticated
 drop policy if exists mod_insert on public.mod_actions;
 create policy mod_insert on public.mod_actions for insert to authenticated
   with check (by_id = auth.uid() and my_rank() >= 2
-    and my_rank() > rank_of(target));
+    and (my_rank() = 3 or my_rank() > rank_of(target)));
 
--- Banir/desbanir: Gestor+ e só quem tem cargo abaixo do seu.
+-- Banir/desbanir: Gestor só quem tem cargo abaixo do seu; Admin qualquer um (menos a si mesmo).
 alter table public.bans enable row level security;
 drop policy if exists bans_read on public.bans;
 create policy bans_read on public.bans for select to authenticated
   using (user_id = auth.uid() or my_rank() >= 2);
 drop policy if exists bans_insert on public.bans;
 create policy bans_insert on public.bans for insert to authenticated
-  with check (my_rank() >= 2 and user_id <> auth.uid() and my_rank() > rank_of(user_id) and by_id = auth.uid());
+  with check (my_rank() >= 2 and user_id <> auth.uid() and (my_rank() = 3 or my_rank() > rank_of(user_id)) and by_id = auth.uid());
 drop policy if exists bans_update on public.bans;
 create policy bans_update on public.bans for update to authenticated
-  using (my_rank() >= 2 and my_rank() > rank_of(user_id))
-  with check (my_rank() >= 2 and user_id <> auth.uid() and my_rank() > rank_of(user_id) and by_id = auth.uid());
+  using (my_rank() >= 2 and (my_rank() = 3 or my_rank() > rank_of(user_id)))
+  with check (my_rank() >= 2 and user_id <> auth.uid() and (my_rank() = 3 or my_rank() > rank_of(user_id)) and by_id = auth.uid());
 drop policy if exists bans_delete on public.bans;
 create policy bans_delete on public.bans for delete to authenticated
-  using (my_rank() >= 2 and my_rank() > rank_of(user_id));
+  using (my_rank() >= 2 and (my_rank() = 3 or my_rank() > rank_of(user_id)));
 
 -- ---------------------------------------------------------------- Agenda (link iCal privado)
 -- Só a própria pessoa lê/grava o link. Os outros só veem "Em reunião até HH:MM" (pela presença).

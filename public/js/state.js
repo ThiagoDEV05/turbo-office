@@ -31,8 +31,8 @@ export const rank = (role) => ROLES[role]?.rank || 0;
 export const myProfile = () => state.profiles.get(state.me);
 export const myRank = () => rank(myProfile()?.role);
 export const canManageRooms = () => myRank() >= 2;
-// Gestor/Admin só moderam quem tem cargo abaixo do seu.
-export const canModerate = (id) => id !== state.me && myRank() >= 2 && myRank() > rank(state.profiles.get(id)?.role);
+// Gestor só modera quem tem cargo abaixo do seu; Admin modera todo mundo, inclusive outros Admins.
+export const canModerate = (id) => id !== state.me && myRank() >= 2 && (myRank() === 3 || myRank() > rank(state.profiles.get(id)?.role));
 
 export const STATUS_LABEL = { available: 'Disponível', busy: 'Ocupado', away: 'Ausente' };
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
