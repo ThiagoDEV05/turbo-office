@@ -900,7 +900,7 @@ async function renderVoiceTab(box) {
         switchRow('Ganho automático', 'Ajusta o volume da sua voz sozinho.', audio.autoGainControl, (v) => setAudioProcessing({ autoGainControl: v }))),
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Transmissão de tela'),
         switchRow('Transmitir o som junto', 'Manda o som da aba ou do sistema junto com a tela.', q.audio !== false, (v) => setScreenQuality({ audio: v })),
-        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'A tela é transmitida em 1080p a 30 fps para todos, a qualidade que deixa texto e planilhas mais nítidos.'))),
+        h('div', { class: 'muted small', style: 'margin-top:6px' }, 'A tela é transmitida em 1440p a 30 fps para todos, a qualidade que deixa texto e planilhas mais nítidos.'))),
     h('div', {},
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Câmera'), camSel, h('div', { style: 'height:8px' }), preview, camBtn),
       h('div', { class: 'set-sec' }, h('span', { class: 'lbl' }, 'Fundo da câmera'), bgBox))));
