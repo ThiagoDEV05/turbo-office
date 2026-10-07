@@ -121,7 +121,7 @@ input, select { font: inherit; color: inherit; }
 .chan .ico { width: 18px; text-align: center; flex: none; opacity: .8; }
 .chan .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chan .lock { font-size: 11px; opacity: .7; }
-.room-timer { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.room-timer { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ok); }
 .chan .badge { background: var(--danger); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; line-height: 17px; font-weight: 700; }
 .chan .edit { display: none; font-size: 13px; padding: 0 4px; opacity: .7; }
 .chan:hover .edit { display: inline; }
