@@ -1,7 +1,7 @@
 // Renderização da interface: canais, membros, cabeçalho, popovers, modais e notificações.
 import {
   state, on, ROLES, rank, myProfile, myRank, canManageRooms, canModerate, STATUS_LABEL, COLORS,
-  displayName, colorOf, initials, membersIn, dmOther, photoOf, statusLine,
+  displayName, colorOf, initials, membersIn, roomSince, dmOther, photoOf, statusLine,
 } from './state.js';
 import {
   local, switchDevice, getUserVolume, setUserVolume, setSpeaker, canPickSpeaker,
@@ -151,6 +151,19 @@ function toggleCollapsed(id) {
   renderChannels(lastUnreadOf);
 }
 
+// Tempo de chamada da sala (mm:ss ou h:mm:ss); um único relógio atualiza todos na tela
+const fmtElapsed = (ms) => {
+  const t = Math.max(0, Math.floor(ms / 1000)), hh = Math.floor(t / 3600), mm = Math.floor(t / 60) % 60, ss = String(t % 60).padStart(2, '0');
+  return hh ? `${hh}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
+};
+const roomTimer = (roomId) => {
+  const since = roomSince(roomId);
+  return since ? h('span', { class: 'room-timer', 'data-since': since, title: 'Tempo de chamada desde que a sala deixou de estar vazia' }, fmtElapsed(Date.now() - since)) : null;
+};
+setInterval(() => {
+  for (const el of document.querySelectorAll('.room-timer[data-since]')) el.textContent = fmtElapsed(Date.now() - Number(el.dataset.since));
+}, 1000);
+
 function roomEntry(r, unreadOf) {
   const manage = canManageRooms() && myRank() >= rank(r.min_role);
   const lock = r.min_role !== 'membro' ? h('span', { class: 'lock', title: `Só ${ROLES[r.min_role].label}+` }, '🔒') : null;
@@ -171,7 +184,7 @@ function roomEntry(r, unreadOf) {
     onclick: (e) => { e.stopPropagation(); A.openRoomChat(r.id); },
   }, '💬', chatUnread ? h('span', { class: 'badge' }, chatUnread > 99 ? '99+' : String(chatUnread)) : null);
   const btn = h('button', { class: `chan voice${isActive('voice', r.id) ? ' active' : ''}${here ? ' here' : ''}`, 'data-room': r.id, onclick: () => A.joinVoice(r.id), title: here ? 'Você está nesta sala' : 'Entrar na sala' },
-    h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), lock, chatBtn, edit);
+    h('span', { class: 'ico' }), h('span', { class: 'nm' }, r.name), roomTimer(r.id), lock, chatBtn, edit);
   btn.querySelector('.ico').innerHTML = icons.speaker;
   const out = [btn];
   const music = state.music.get(r.id)?.current;
@@ -289,6 +302,8 @@ export function renderHeader() {
   $('#mainIcon').textContent = icon;
   $('#mainTitle').textContent = title;
   $('#mainSub').textContent = sub;
+  const timer = v?.type === 'voice' ? roomTimer(v.id) : null;
+  if (timer) $('#mainSub').append(' · ⏱ ', timer);
 }
 
 export function renderUserPanel() {

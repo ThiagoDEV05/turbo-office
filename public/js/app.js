@@ -1,6 +1,6 @@
 // Controlador principal: sessão, dados, navegação, salas de voz e ações.
 import { getSupabase, getConfig } from './supa.js';
-import { state, on, emit, myProfile, myRank, rank, displayName, membersIn, dmKey, ROLES } from './state.js';
+import { state, on, emit, myProfile, myRank, rank, displayName, membersIn, roomSince, dmKey, ROLES } from './state.js';
 import { startNet, setMeta, getMeta, sendTo, stopNet } from './net.js';
 import * as net from './net.js';
 import * as rtc from './rtc.js';
@@ -169,7 +169,7 @@ async function joinVoice(roomId) {
   state.voiceRoom = roomId;
   state.modMuted = false;
   prevRoomMembers = new Set(membersIn(roomId).filter((id) => id !== state.me));
-  setMeta({ room: roomId });
+  setMeta({ room: roomId, roomSince: roomSince(roomId) || Date.now() });
   selectView({ type: 'voice', id: roomId });
   if (rtc.local.micOn && !(await rtc.startMic())) {
     ui.toast({ title: 'Microfone bloqueado', body: 'Você entrou só ouvindo. Libere o microfone no navegador para falar.' });
@@ -186,7 +186,7 @@ function leaveVoice(silent = false) {
   rtc.stopAllMedia();
   state.voiceRoom = null;
   state.modMuted = false;
-  setMeta({ room: null });
+  setMeta({ room: null, roomSince: null });
   rtc.publishMedia();
   music.onRoomChange();
   if (!silent) ui.sounds.leave();

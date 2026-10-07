@@ -64,3 +64,10 @@ export function initials(name = '') {
   return name.split(' ').filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('') || '?';
 }
 export const membersIn = (roomId) => [...state.presence.entries()].filter(([, p]) => p.room === roomId).map(([id]) => id);
+// Início da chamada na sala (como no Discord): quem entra herda o horário de quem já está lá,
+// então o tempo continua até a sala esvaziar. Sem ninguém (ou só clientes antigos), null.
+export const roomSince = (roomId) => {
+  let min = null;
+  for (const p of state.presence.values()) if (p.room === roomId && p.roomSince && (min === null || p.roomSince < min)) min = p.roomSince;
+  return min;
+};
