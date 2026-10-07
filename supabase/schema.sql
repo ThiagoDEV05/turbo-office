@@ -197,6 +197,34 @@ drop policy if exists rooms_delete on public.rooms;
 create policy rooms_delete on public.rooms for delete to authenticated
   using (my_rank() >= 2 and my_rank() >= role_rank(min_role));
 
+-- A sala herda o cargo mínimo da categoria: numa categoria só de Admin, nenhuma sala fica visível para Membro.
+-- Todas as checagens (ver, entrar, ler e escrever) usam rooms.min_role, então basta mantê-lo >= o da categoria.
+create or replace function public.room_inherit_category_role() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.min_role := coalesce((select greatest_role(new.min_role, c.min_role) from categories c where c.id = new.category_id), new.min_role);
+  new.write_role := greatest_role(new.write_role, new.min_role);
+  return new;
+end $$;
+drop trigger if exists rooms_inherit_category_role on public.rooms;
+create trigger rooms_inherit_category_role before insert or update of min_role, write_role, category_id on public.rooms
+  for each row execute function public.room_inherit_category_role();
+
+create or replace function public.category_role_to_rooms() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update rooms set min_role = new.min_role where category_id = new.id and role_rank(min_role) < role_rank(new.min_role);
+  return new;
+end $$;
+drop trigger if exists categories_role_to_rooms on public.categories;
+create trigger categories_role_to_rooms after update of min_role on public.categories
+  for each row execute function public.category_role_to_rooms();
+
+-- Corrige salas que já estavam abaixo do cargo da categoria
+update public.rooms r set min_role = c.min_role
+  from public.categories c
+  where c.id = r.category_id and role_rank(r.min_role) < role_rank(c.min_role);
+
 -- ---------------------------------------------------------------- Estrutura inicial
 -- Espelha o servidor "Performance Turbo". Só roda quando ainda não há categorias;
 -- remove as salas-padrão de versões anteriores (as criadas por pessoas são mantidas).
